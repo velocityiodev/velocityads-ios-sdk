@@ -2,7 +2,7 @@
 
 Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 
-**Requirements:** iOS 15.0+, Xcode 16.0+, Swift 5.5+
+**Requirements:** iOS 13.0+, Xcode 16.0+, Swift 5.5+
 
 ---
 
@@ -13,7 +13,7 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
    ```
    https://github.com/velocityiodev/velocityads-ios-sdk
    ```
-3. Choose the version rule (e.g. "Up to Next Major" from `0.1.0`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" from `0.1.1`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 ---

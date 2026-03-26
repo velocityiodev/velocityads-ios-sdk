@@ -1,8 +1,8 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.1.0  
-**Last Updated:** February 2026  
-**Platform:** iOS 15.0+  
+**Version:** 0.1.1  
+**Last Updated:** March 2026  
+**Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
 
 ---
@@ -32,7 +32,7 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 
 ### System Requirements
 
-- **Minimum iOS:** 15.0
+- **Minimum iOS:** 13.0
 - **Xcode:** 16.0+
 - **Swift:** 5.5+
 
@@ -57,10 +57,10 @@ The Velocity Ads SDK is distributed via **Swift Package Manager**.
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Choose the version rule (e.g. "Up to Next Major" starting from `0.1.0`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" starting from `0.1.1`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
 
-The package uses a binary target hosted on GitHub Releases. Each release (e.g. `0.1.0`) provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
+The package uses a binary target hosted on GitHub Releases. Each release (e.g. `0.1.1`) provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
 
 ---
 
@@ -659,5 +659,5 @@ protocol AdCallback: AnyObject {
 
 ---
 
-**Last Updated:** February 2026  
-**SDK Version:** 0.1.0
+**Last Updated:** March 2026  
+**SDK Version:** 0.1.1
