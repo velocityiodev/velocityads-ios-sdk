@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.1] - 2026-03-26
+
+- Lowered minimum iOS deployment target iOS 13.0
+
 ## [0.1.0] - 2026-02-25
 
 Initial release of VelocityAds SDK for iOS.

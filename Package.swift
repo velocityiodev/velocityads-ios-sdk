@@ -4,15 +4,15 @@ import PackageDescription
 
 let package = Package(
     name: "VelocityAdsSDK",
-    platforms: [.iOS(.v15)],
+    platforms: [.iOS(.v13)],
     products: [
         .library(name: "VelocityAdsSDK", targets: ["VelocityAdsSDK"]),
     ],
     targets: [
         .binaryTarget(
             name: "VelocityAdsSDK",
-            url: "https://github.com/velocityiodev/velocityads-ios-sdk/releases/download/0.1.0/VelocityAdsSDK-0.1.0.zip",
-            checksum: "f07a474ac1368608fca129e42db6e81ee0d6e6ac35c7a75edf40aac8ee33aa14"
+            url: "https://github.com/velocityiodev/velocityads-ios-sdk/releases/download/0.1.1/VelocityAdsSDK-0.1.1.zip",
+            checksum: "5289d0bc00e987543a802d20c2a2e49c5ab2a770adeddd68ade97e16d6487101"
         ),
     ]
 )
