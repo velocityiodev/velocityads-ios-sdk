@@ -1,6 +1,6 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.1.1  
+**Version:** 0.2.0  
 **Last Updated:** March 2026  
 **Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
@@ -57,31 +57,39 @@ The Velocity Ads SDK is distributed via **Swift Package Manager**.
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Choose the version rule (e.g. "Up to Next Major" starting from `0.1.1`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" starting from `0.2.0`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
 
-The package uses a binary target hosted on GitHub Releases. Each release (e.g. `0.1.1`) provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
+The package uses a binary target hosted on GitHub Releases. Each release (e.g. `0.2.0`) provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
 
 ---
 
 ## SDK Initialization
 
-### Basic Initialization
-
-Initialize the SDK at app startup (e.g. in your `AppDelegate` or `@main` App struct):
+Initialize the SDK once at app startup and always provide a `VelocityAdsInitDelegate`.
 
 ```swift
-import UIKit
-import VelocityAdsSDK
-
-@main
 class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
 
-        VelocityAds.initSDK(appKey: "YOUR_APPLICATION_KEY")
+        VelocityAds.setUserId("USER_ID")  // Optional: User identifier
+        
+        let initRequest = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY").build()
+        VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
 
         return true
+    }
+}
+
+class MyInitDelegate: VelocityAdsInitDelegate {
+    func onInitSuccess() {
+        print("SDK initialized successfully")
+    }
+
+    func onInitFailure(error: VelocityAdsError) {
+        print("Initialization failed: \(error)")
+        // Handle initialization failure
     }
 }
 ```
@@ -95,7 +103,8 @@ import VelocityAdsSDK
 @main
 struct MyApp: App {
     init() {
-        VelocityAds.initSDK(appKey: "YOUR_APPLICATION_KEY")
+        let initRequest = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY").build()
+        VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
     }
 
     var body: some Scene {
@@ -106,60 +115,36 @@ struct MyApp: App {
 }
 ```
 
+For best performance, call `VelocityAds.setUserId(_:)` before `VelocityAds.initSDK(...)` when a user identifier is available.
+
 **Important:**
 - ⚠️ Initialize once during app startup
 - ⚠️ Must be called before loading any ads
-
-### Advanced Initialization with Callback
-
-For better control and error handling:
-
-```swift
-class AppDelegate: UIResponder, UIApplicationDelegate {
-    func application(_ application: UIApplication,
-                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-
-        VelocityAds.initSDK(
-            appKey: "YOUR_APPLICATION_KEY",
-            publisherUserId: "USER_12345",  // Optional: User identifier
-            debug = false,  // Set to true to enable debug logging for troubleshooting
-            callback: MyInitCallback()
-        )
-
-        return true
-    }
-}
-
-class MyInitCallback: InitCallback {
-    func onInitSuccess(sessionId: String, mediationEnabled: Bool) {
-        print("SDK initialized successfully")
-    }
-
-    func onInitFailure(error: String) {
-        print("Initialization failed: \(error)")
-        // Handle initialization failure
-    }
-}
-```
 
 ## Loading Native Ads
 
 The SDK provides a method for loading native ads:
 
-1. **`loadNativeAd(prompt:aiResponse:conversationHistory:dimensions:adUnitId:callback:)`** - Returns ad data model via callback (`NativeAd`)
+- **`VelocityNativeAdRequest`** — Immutable request object built via a fluent builder. Holds all targeting context.
+- **`VelocityNativeAd`** — The ad object. Create one from a request and call `loadAd(delegate:)` to trigger loading. Ad properties (`title`, `description`, etc.) are populated when `onAdLoaded` is called.
 
 ```swift
-VelocityAds.loadNativeAd(
-    prompt: "What's the weather today?",
-    aiResponse: "The weather is sunny with 72°F...",  // Optional: provide AI response for better targeting
-    conversationHistory: nil,  // Optional: conversation history for better targeting
-    dimensions: AdDimensions(width: 320, height: 50),  // Always provide ad dimensions in points
-    adUnitId: "ad_unit_123",  // Optional
-    callback: self
-)
+// 1. Build the request
+let adRequest = VelocityNativeAdRequest.Builder()
+    .withPrompt("What's the weather today?")              // Optional
+    .withAIResponse("The weather is sunny with 72°F...")  // Optional: improves targeting
+    .withConversationHistory(nil)                         // Optional
+    .withAdditionalContext(nil)                           // Optional
+    .withAdUnitId("ad_unit_123")                          // Optional
+    .build()
 
-// AdCallback implementation
-func onSuccess(nativeAd: NativeAd) {
+// 2. Create the ad object and load
+let nativeAd = VelocityNativeAd(adRequest)
+nativeAd.loadAd(delegate: self)
+
+// VelocityNativeAdDelegate implementation
+func onAdLoaded(nativeAd: VelocityNativeAd) {
+    // Ad properties are now available
     // Display ad manually
     titleLabel.text = nativeAd.title
     descriptionLabel.text = nativeAd.description
@@ -179,9 +164,13 @@ func onSuccess(nativeAd: NativeAd) {
     trackImpression(nativeAd.impressionUrl)
 }
 
-func onError(error: String) {
+func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
     print("Failed to load ad: \(error)")
 }
+
+func onAdImpression(nativeAd: VelocityNativeAd) {}
+
+func onAdClicked(nativeAd: VelocityNativeAd) {}
 ```
 
 ### Conversation History
@@ -189,53 +178,31 @@ func onError(error: String) {
 For better ad targeting in chat applications, you can provide conversation history:
 
 ```swift
-// First call - no conversation history
-VelocityAds.loadNativeAd(
-    prompt: "What's the weather today?",
-    aiResponse: "The weather is sunny...",  // Optional: provide AI response for better targeting
-    conversationHistory: nil,  // Empty on first call
-    dimensions: AdDimensions(width: 320, height: 50),  // Always provide ad dimensions in points
-    callback: adCallback
-)
+// First call — no conversation history
+let adRequest1 = VelocityNativeAdRequest.Builder()
+    .withPrompt("What's the weather today?")    // Optional: provide for context
+    .withAIResponse("The weather is sunny...")  // Optional: provide AI response for better targeting
+    .build()
+let nativeAd1 = VelocityNativeAd(adRequest1)
+nativeAd1.loadAd(delegate: self)
 
-// Subsequent calls - with conversation history
+// Subsequent calls — with conversation history
 let conversationHistory: [[String: Any]] = [
     ["role": "user", "content": "What's the weather today?"],
     ["role": "assistant", "content": "The weather is sunny..."]
 ]
 
-VelocityAds.loadNativeAd(
-    prompt: "What about tomorrow?",
-    aiResponse: "Tomorrow will be cloudy...",  // Optional: provide AI response for better targeting
-    conversationHistory: conversationHistory,  // Previous conversation
-    dimensions: AdDimensions(width: 320, height: 50),  // Always provide ad dimensions in points
-    callback: adCallback
-)
+let adRequest2 = VelocityNativeAdRequest.Builder()
+    .withPrompt("What about tomorrow?")            // Optional: provide for context
+    .withAIResponse("Tomorrow will be cloudy...")  // Optional: provide AI response for better targeting
+    .withConversationHistory(conversationHistory)  // Previous conversation
+    .build()
+let nativeAd2 = VelocityNativeAd(adRequest2)
+nativeAd2.loadAd(delegate: self)
 ```
 
-**Note:** The `conversationHistory` parameter accepts an array of dictionaries (`[[String: Any]]?`). Each dictionary should have `"role"` (`"user"` or `"assistant"`) and `"content"` (message text). Update it with the full conversation history for best targeting.
+**Note:** The `withConversationHistory` parameter accepts an array of dictionaries (`[[String: Any]]?`). Each dictionary should have `"role"` (`"user"` or `"assistant"`) and `"content"` (message text). Update it with the full conversation history for best targeting.
 
-
-### Ad Dimensions
-
-Always provide ad dimensions in **points**:
-
-```swift
-// Use view or screen dimensions
-let dimensions = AdDimensions(
-    width: Int(adContainerView.bounds.width),
-    height: Int(adContainerView.bounds.height)
-)
-```
-
-Or use fixed dimensions:
-
-```swift
-let dimensions = AdDimensions(
-    width: 320,  // points
-    height: 50   // points
-)
-```
 
 ---
 
@@ -247,7 +214,7 @@ let dimensions = AdDimensions(
 import UIKit
 import VelocityAdsSDK
 
-class ChatViewController: UIViewController, AdCallback {
+class ChatViewController: UIViewController, VelocityNativeAdDelegate {
     private var conversationHistory: [[String: Any]] = []
 
     private func onUserMessage(_ userMessage: String) {
@@ -267,32 +234,32 @@ class ChatViewController: UIViewController, AdCallback {
     }
 
     private func loadContextualAd(prompt: String, aiResponse: String?) {
-        let width = Int(view.bounds.width)
-        let height = 50
-        let dimensions = AdDimensions(width: width, height: height)
-
         // Pass conversation history (empty on first call)
         let historyToPass = conversationHistory.isEmpty ? nil : conversationHistory
 
-        VelocityAds.loadNativeAd(
-            prompt: prompt,
-            aiResponse: aiResponse,  // Optional
-            conversationHistory: historyToPass,  // Optional conversation history
-            dimensions: dimensions,
-            adUnitId: nil,  // Optional
-            callback: self
-        )
+        let adRequest = VelocityNativeAdRequest.Builder()
+            .withPrompt(prompt)
+            .withAIResponse(aiResponse)
+            .withConversationHistory(historyToPass) // Optional conversation history
+            .build()
+
+        let nativeAd = VelocityNativeAd(adRequest)
+        nativeAd.loadAd(delegate: self)
     }
 
-    func onSuccess(nativeAd: NativeAd) {
+    func onAdLoaded(nativeAd: VelocityNativeAd) {
         // Display ad manually using custom UI
         displayAdManually(nativeAd)
     }
 
-    func onError(error: String) {
+    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
         // Continue without ad
         print("Ad load failed: \(error)")
     }
+
+    func onAdImpression(nativeAd: VelocityNativeAd) {}
+
+    func onAdClicked(nativeAd: VelocityNativeAd) {}
 }
 ```
 
@@ -302,66 +269,69 @@ class ChatViewController: UIViewController, AdCallback {
 class AdTableViewCell: UITableViewCell {
     static let reuseId = "AdCell"
     private let containerView = UIView()
+    private var adDelegate: AdCellDelegate?
 
     func configure(prompt: String, aiResponse: String? = nil) {
         containerView.subviews.forEach { $0.removeFromSuperview() }
-        let dimensions = AdDimensions(width: Int(bounds.width), height: Int(bounds.height))
 
-        VelocityAds.loadNativeAd(
-            prompt: prompt,
-            aiResponse: aiResponse,  // Optional
-            conversationHistory: nil,  // Optional
-            dimensions: dimensions,
-            adUnitId: nil,  // Optional
-            callback: AdCellCallback(containerView: containerView, cell: self)
-        )
+        let adRequest = VelocityNativeAdRequest.Builder()
+            .withPrompt(prompt)
+            .withAIResponse(aiResponse)
+            .build()
+
+        let nativeAd = VelocityNativeAd(adRequest)
+        // Retain the delegate so it is alive when the callback fires
+        adDelegate = AdCellDelegate(containerView: containerView, cell: self)
+        nativeAd.loadAd(delegate: adDelegate!)
     }
 }
 
-// Use a callback object that holds the container; ensure it is retained until callback
-private class AdCellCallback: AdCallback {
+// Use a delegate object that holds the container; ensure it is retained until the callback
+private class AdCellDelegate: VelocityNativeAdDelegate {
     weak var containerView: UIView?
     weak var cell: UITableViewCell?
 
-    func onSuccess(nativeAd: NativeAd) {
+    init(containerView: UIView, cell: UITableViewCell) {
+        self.containerView = containerView
+        self.cell = cell
+    }
+
+    func onAdLoaded(nativeAd: VelocityNativeAd) {
         guard let containerView = containerView else { return }
         // Build and add ad UI to containerView
     }
 
-    func onError(error: String) {
+    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
         // Hide ad container or show placeholder
         cell?.contentView.isHidden = true
     }
+
+    func onAdImpression(nativeAd: VelocityNativeAd) {}
+
+    func onAdClicked(nativeAd: VelocityNativeAd) {}
 }
 ```
 
 ### Example 3: Article Reader
 
 ```swift
-class ArticleViewController: UIViewController, AdCallback {
+class ArticleViewController: UIViewController, VelocityNativeAdDelegate {
 
     private func loadArticle(_ article: Article) {
         // Display article content
         titleLabel.text = article.title
         contentLabel.text = article.content
 
-        let dimensions = AdDimensions(
-            width: Int(contentView.bounds.width),
-            height: 400  // Fixed height for article ads (points)
-        )
+        let adRequest = VelocityNativeAdRequest.Builder()
+            .withPrompt(article.title)        // Optional
+            .withAIResponse(article.content)  // Optional
+            .build()
 
-        // Load contextual ad
-        VelocityAds.loadNativeAd(
-            prompt: article.title,
-            aiResponse: article.content,  // Optional
-            conversationHistory: nil,  // Optional
-            dimensions: dimensions,
-            adUnitId: nil,  // Optional
-            callback: self
-        )
+        let nativeAd = VelocityNativeAd(adRequest)
+        nativeAd.loadAd(delegate: self)
     }
 
-    func onSuccess(nativeAd: NativeAd) {
+    func onAdLoaded(nativeAd: VelocityNativeAd) {
         // Display ad manually using custom UI
         displayAdManually(nativeAd)
 
@@ -369,9 +339,13 @@ class ArticleViewController: UIViewController, AdCallback {
         // (ad view would be inserted at position 1)
     }
 
-    func onError(error: String) {
+    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
         print("Ad load failed: \(error)")
     }
+
+    func onAdImpression(nativeAd: VelocityNativeAd) {}
+
+    func onAdClicked(nativeAd: VelocityNativeAd) {}
 }
 ```
 
@@ -386,22 +360,20 @@ class ArticleViewController: UIViewController, AdCallback {
 **Problem:** Calling `loadNativeAd` before `initSDK`, or loading ads before initialization has completed.
 
 
-**Solution 1 — Use InitCallback:** 
+**Solution 1 — Use VelocityAdsInitDelegate:** 
 Initialize at startup and only load ads after initialization succeeds. This avoids calling `loadNativeAd` before the SDK is ready.
 
 ```swift
-VelocityAds.initSDK(
-    appKey: "YOUR_APPLICATION_KEY",
-    callback: MyInitCallback()
-)
+let initRequest = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY").build()
+VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
 
-class MyInitCallback: InitCallback {
-    func onInitSuccess(sessionId: String, mediationEnabled: Bool) {
+class MyInitDelegate: VelocityAdsInitDelegate {
+    func onInitSuccess() {
         // SDK is ready — enable ad loading in your UI or trigger first ad load
         enableAdLoading()
     }
     
-    func onInitFailure(error: String) {
+    func onInitFailure(error: VelocityAdsError) {
         // Handle failure (e.g. show message, disable ad features)
         print("SDK init failed: \(error)")
     }
@@ -418,15 +390,99 @@ guard VelocityAds.isInitialized() else {
     return  // Skip this ad load, or retry later when initialized
 }
 
-VelocityAds.loadNativeAd(
-    prompt: prompt,
-    aiResponse: aiResponse,
-    conversationHistory: conversationHistory,
-    dimensions: dimensions,
-    adUnitId: adUnitId,
-    callback: self
-)
+let adRequest = VelocityNativeAdRequest.Builder()
+    .withPrompt(prompt)
+    .withAIResponse(aiResponse)
+    .withConversationHistory(conversationHistory)
+    .withAdditionalContext(additionalContext)
+    .withAdUnitId(adUnitId)
+    .build()
+let nativeAd = VelocityNativeAd(adRequest)
+nativeAd.loadAd(delegate: self)
 ```
+
+#### Init Failure Handling (Connectivity + Retry)
+
+Initialization can fail due to transient network conditions (offline, weak signal, DNS timeout, captive portals, temporary server errors). A resilient integration should:
+
+- Check connectivity before retrying
+- Retry with exponential backoff (and jitter)
+- Stop retrying after a max attempt count
+- Keep app UX responsive (do not block startup forever)
+
+Example strategy:
+
+```swift
+import Network
+import VelocityAdsSDK
+
+final class SDKInitCoordinator: VelocityAdsInitDelegate {
+    private let monitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "sdk.init.network.monitor")
+    private var isOnline = true
+
+    private var retryAttempt = 0
+    private let maxRetries = 3
+    private let baseDelay: TimeInterval = 1.0   // 1s
+    private let maxDelay: TimeInterval = 30.0   // cap
+
+    func start() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            self?.isOnline = (path.status == .satisfied)
+        }
+        monitor.start(queue: monitorQueue)
+        initSDK()
+    }
+
+    private func initSDK() {
+        let request = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY").build()
+        VelocityAds.initSDK(initRequest, delegate: self)
+    }
+
+    func onInitSuccess() {
+        retryAttempt = 0
+        print("VelocityAds init success")
+    }
+
+    func onInitFailure(error: VelocityAdsError) {
+        print("VelocityAds init failed: \(error)")
+
+        guard retryAttempt < maxRetries else {
+            print("Max retries reached. Continue app flow without ads for now.")
+            return
+        }
+
+        guard isOnline else {
+            print("Offline detected. Wait for connectivity before retrying.")
+            return
+        }
+
+        // Exponential backoff with jitter:
+        // delay = min(maxDelay, baseDelay * 2^attempt) + random(0...0.5)
+        let exponential = min(maxDelay, baseDelay * pow(2.0, Double(retryAttempt)))
+        let jitter = Double.random(in: 0...0.5)
+        let delay = exponential + jitter
+
+        retryAttempt += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.initSDK()
+        }
+    }
+
+    deinit {
+        monitor.cancel()
+    }
+}
+```
+
+Best practices:
+
+- Retry only transient failures (network/timeouts/5xx). Avoid aggressive retries for configuration errors.
+- Add jitter to avoid synchronized retry spikes across devices.
+- Cap retry delay and max attempts to protect battery/data usage.
+- Reset retry counter after any successful init.
+- Re-attempt init when app becomes active and network is restored.
+- Log failures and retry metadata (`attempt`, `delay`, `error.code`) for observability.
 
 #### 2. Ads Not Loading
 
@@ -437,10 +493,10 @@ VelocityAds.loadNativeAd(
 
 **Enable Debug Mode:**
 ```swift
-VelocityAds.initSDK(
-    appKey: "YOUR_APPLICATION_KEY",
-    debug = false,  // Enable debug logs
-}
+let initRequest = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY")
+    .withDebug(true)
+    .build()
+VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
 ```
 
 #### 3. Memory / Lifecycle
@@ -541,7 +597,7 @@ VelocityAds.setConsent(false)
 
 ✅ **DO:**
 - Clear or release ad-related views when they are no longer visible
-- Use weak references where appropriate (e.g. in callbacks)
+- Use weak references where appropriate (e.g. in delegates)
 - Clean up in `deinit` or when the view controller is dismissed
 
 ❌ **DON'T:**
@@ -552,7 +608,7 @@ VelocityAds.setConsent(false)
 ✅ **DO:**
 
 ```swift
-func onError(error: String) {
+func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
     print("Ad error: \(error)")
     // Show fallback content or hide ad space
     hideAdView()
@@ -568,96 +624,153 @@ func onError(error: String) {
 
 ### VelocityAds
 
-#### `initSDK(appKey:publisherUserId:debug:callback:)`
+#### `setUserId(_:)`
 
 ```swift
-VelocityAds.initSDK(
-    appKey: String,
-    publisherUserId: String? = nil,
-    debug: Bool = false,
-    callback: InitCallback? = nil
-)
+VelocityAds.setUserId(_ userId: String?)
 ```
 
 **Parameters:**
-- `appKey` - Your application key (required)
-- `publisherUserId` - User identifier (optional)
-- `debug` - Enable debug logging (optional)
-- `callback` - Initialization callback (optional)
+- `userId` - Publisher user identifier (optional)
 
-#### `loadNativeAd(prompt:aiResponse:conversationHistory:dimensions:adUnitId:callback:)`
+For best performance, set user ID before calling `initSDK`.
+
+#### `initSDK(_:delegate:)`
 
 ```swift
-VelocityAds.loadNativeAd(
-    prompt: String,
-    aiResponse: String? = nil,
-    conversationHistory: [[String: Any]]? = nil,
-    dimensions: AdDimensions,
-    adUnitId: String? = nil,
-    callback: AdCallback
-)
+let request = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY").build()
+VelocityAds.initSDK(request, delegate: MyInitDelegate())
 ```
 
 **Parameters:**
-- `prompt` - User's query/prompt (required)
-- `aiResponse` - AI-generated response content (optional)
-- `conversationHistory` - Optional conversation history for ad targeting (array of dictionaries with `"role"` and `"content"`)
-- `dimensions` - Ad dimensions in points (required)
+- `request` - Initialization request object containing required `appKey` and optional `debug`
+- `delegate` - Initialization delegate (required)
+
+#### `VelocityNativeAdRequest` / `VelocityNativeAd`
+
+```swift
+let adRequest = VelocityNativeAdRequest.Builder()
+    .withPrompt(_ prompt: String?)
+    .withAIResponse(_ aiResponse: String?)
+    .withConversationHistory(_ history: [[String: Any]]?)
+    .withAdditionalContext(_ context: String?)
+    .withAdUnitId(_ adUnitId: String?)
+    .build() -> VelocityNativeAdRequest
+
+let nativeAd = VelocityNativeAd(adRequest)
+nativeAd.loadAd(delegate: VelocityNativeAdDelegate)
+```
+
+**`VelocityNativeAdRequest` builder parameters:**
+- `prompt` - User's prompt (optional, but recommended for context)
+- `aiResponse` - AI-generated response content (optional, but recommended for targeting)
+- `conversationHistory` - Conversation history for ad targeting — array of `["role": "user"/"assistant", "content": "..."]` dictionaries (optional)
+- `additionalContext` - Extra context string to improve ad relevance (optional)
 - `adUnitId` - Ad unit identifier (optional)
-- `callback` - Ad loading callback (required)
+
+**`VelocityNativeAd` properties (available after `onAdLoaded`):**
+- `adId` (`String`) - Unique ad identifier
+- `title` (`String`) - Ad title/headline
+- `description` (`String`) - Ad body text
+- `callToAction` (`String`) - CTA button text (e.g., "Learn More")
+- `sponsoredBy` (`String`) - Advertiser/sponsor name
+- `imageUrl` (`String`) - Ad image URL
+- `clickUrl` (`String`) - Destination URL when ad is clicked
+- `impressionUrl` (`String`) - URL to track ad impressions
 
 ### Models
 
-#### `AdDimensions`
+#### `VelocityAdsInitRequest`
 
 ```swift
-AdDimensions(width: Int, height: Int)
-```
-
-- `width` - Width in points
-- `height` - Height in points
-
-#### `NativeAd`
-
-```swift
-struct NativeAd {
-    let id: String                    // Unique ad identifier
-    let title: String                 // Ad title/headline
-    let description: String           // Ad body text
-    let callToAction: String          // CTA button text (e.g., "Learn More")
-    let sponsoredBy: String           // Advertiser/sponsor name
-    let imageUrl: String              // Ad image URL
-    let clickUrl: String              // Destination URL when ad is clicked
-    let impressionUrl: String         // URL to track ad impressions
-    let category: String              // Ad category (e.g., "Technology")
-    let tags: [String]                // List of relevant tags/keywords
-    let price: String?                // Optional price information
-    let rating: Double?               // Optional rating (0.0 - 5.0)
-    let reviewCount: Int?             // Optional number of reviews
+public final class VelocityAdsInitRequest {
+    public final class Builder {
+        public init(_ appKey: String)
+        public func withDebug(_ debug: Bool) -> Builder
+        public func build() -> VelocityAdsInitRequest
+    }
 }
 ```
 
-### Callbacks
-
-#### `InitCallback`
+#### `VelocityAdsError`
 
 ```swift
-protocol InitCallback: AnyObject {
-    func onInitSuccess(sessionId: String, mediationEnabled: Bool)
-    func onInitFailure(error: String)
+public struct VelocityAdsError: Error, CustomStringConvertible {
+    public let code: Int
+    public let message: String
 }
 ```
 
-#### `AdCallback`
+`VelocityAdsError` conforms to `CustomStringConvertible`, so `print(error)` includes both code and message.
 
 ```swift
-protocol AdCallback: AnyObject {
-    func onSuccess(nativeAd: NativeAd)
-    func onError(error: String)
+public enum VelocityAdsErrorCode {
+    // Network / server errors (1xxx)
+    public static let invalidURL: Int              // 1000
+    public static let networkError: Int            // 1001
+    public static let jsonParseError: Int          // 1002
+    public static let invalidResponse: Int         // 1003
+    public static let emptyResponseBody: Int       // 1004
+    public static let requestEncodingFailed: Int   // 1005
+    public static let serverErrorField: Int        // 1006
+    public static let httpFailure: Int             // 1007
+
+    // SDK errors (2xxx)
+    public static let sdkNotInitialized: Int           // 2000
+    public static let sdkInitializationInProgress: Int // 2001
+    public static let loadAlreadyInProgress: Int       // 2002
+    public static let loadServiceUnavailable: Int      // 2003
+    public static let invalidAdResponse: Int           // 2004
+    public static let noFill: Int                      // 2005
+}
+```
+
+Error code behavior:
+- HTTP failures use `VelocityAdsErrorCode.httpFailure` (`1007`)
+- HTTP status details are included in `VelocityAdsError.message`
+- SDK-defined constants are centralized in `VelocityAdsErrorCode`:
+
+**Network / server errors (1xxx):**
+  - `VelocityAdsErrorCode.invalidURL` (`1000`) — Malformed URL
+  - `VelocityAdsErrorCode.networkError` (`1001`) — Network request failed
+  - `VelocityAdsErrorCode.jsonParseError` (`1002`) — Response JSON could not be parsed
+  - `VelocityAdsErrorCode.invalidResponse` (`1003`) — Response structure is invalid
+  - `VelocityAdsErrorCode.emptyResponseBody` (`1004`) — Server returned an empty body
+  - `VelocityAdsErrorCode.requestEncodingFailed` (`1005`) — Request body encoding failed
+  - `VelocityAdsErrorCode.serverErrorField` (`1006`) — Server returned an error field in the response
+  - `VelocityAdsErrorCode.httpFailure` (`1007`) — HTTP status code indicates failure
+
+**SDK errors (2xxx):**
+  - `VelocityAdsErrorCode.sdkNotInitialized` (`2000`) — `loadAd` called before `initSDK`
+  - `VelocityAdsErrorCode.sdkInitializationInProgress` (`2001`) — `loadAd` called while initialization is still in progress
+  - `VelocityAdsErrorCode.loadAlreadyInProgress` (`2002`) — `loadAd` called on an ad instance that is already loading
+  - `VelocityAdsErrorCode.loadServiceUnavailable` (`2003`) — Internal load service is not available
+  - `VelocityAdsErrorCode.invalidAdResponse` (`2004`) — Ad response is missing required data
+  - `VelocityAdsErrorCode.noFill` (`2005`) — No ad available for the given context
+
+### Delegates
+
+#### `VelocityAdsInitDelegate`
+
+```swift
+protocol VelocityAdsInitDelegate: AnyObject {
+    func onInitSuccess()
+    func onInitFailure(error: VelocityAdsError)
+}
+```
+
+#### `VelocityNativeAdDelegate`
+
+```swift
+protocol VelocityNativeAdDelegate: AnyObject {
+    func onAdLoaded(nativeAd: VelocityNativeAd)
+    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError)
+    func onAdImpression(nativeAd: VelocityNativeAd)
+    func onAdClicked(nativeAd: VelocityNativeAd)
 }
 ```
 
 ---
 
-**Last Updated:** March 2026  
-**SDK Version:** 0.1.1
+**Last Updated:** March 2026
+**SDK Version:** 0.2.0
