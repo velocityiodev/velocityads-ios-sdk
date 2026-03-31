@@ -13,8 +13,24 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
    ```
    https://github.com/velocityiodev/velocityads-ios-sdk
    ```
-3. Choose the version rule (e.g. "Up to Next Major" from `0.1.1`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" from `0.2.0`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
+
+---
+
+## Installation (CocoaPods)
+
+Add the following to your `Podfile`:
+
+```ruby
+pod 'VelocityAdsSDK', '0.2.0'
+```
+
+Then run:
+
+```bash
+pod install
+```
 
 ---
 
@@ -24,26 +40,41 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 import VelocityAdsSDK
 
 // 1. Initialize at app startup
-VelocityAds.initSDK(
-   appKey: "app_123",
-   publisherUserId: "user_456",
-   callback: myInitCallback
-)
+let initRequest = VelocityAdsInitRequest.Builder("app_123").build()
+VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
 
 // 2. Load a native ad when needed
-VelocityAds.loadNativeAd(
-    prompt: "user query",
-    aiResponse: "AI response text",
-    conversationHistory: conversationHistory,
-    dimensions: AdDimensions(width: 320, height: 50),
-    adUnitId: adUnitId,
-    callback: myAdCallback
-)
+let adRequest = VelocityNativeAdRequest.Builder()
+    .withPrompt("user query")
+    .withAIResponse("AI response text")
+    .withConversationHistory(conversationHistory) // optional
+    .withAdditionalContext("optional extra context") // optional
+    .withAdUnitId(adUnitId) // optional
+    .build()
+
+let nativeAd = VelocityNativeAd(adRequest)
+nativeAd.loadAd(delegate: myAdDelegate)
+```
+
+Delegate contracts:
+
+```swift
+final class MyInitDelegate: VelocityAdsInitDelegate {
+    func onInitSuccess() {}
+    func onInitFailure(error: VelocityAdsError) {}
+}
+
+final class MyAdDelegate: VelocityNativeAdDelegate {
+    func onAdLoaded(nativeAd: VelocityNativeAd) {}
+    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {}
+    func onAdImpression(nativeAd: VelocityNativeAd) {}
+    func onAdClicked(nativeAd: VelocityNativeAd) {}
+}
 ```
 
 ---
 
-## Full documentation
+## Full Documentation
 
 For installation details, initialization options, privacy (CCPA, GDPR, IAB TCF), loading ads, and the full API reference, see the **[Integration Guide](Docs/INTEGRATION_GUIDE.md)**.
 
