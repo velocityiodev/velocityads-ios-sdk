@@ -1,7 +1,7 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.2.0  
-**Last Updated:** March 2026  
+**Version:** 0.3.0  
+**Last Updated:** April 2026  
 **Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
 
@@ -14,11 +14,14 @@
 3. [Installation](#installation)
 4. [SDK Initialization](#sdk-initialization)
 5. [Loading Native Ads](#loading-native-ads)
-6. [Integration Examples](#integration-examples)
-7. [Troubleshooting](#troubleshooting)
-8. [Regulations](#regulations)
-9. [Best Practices](#best-practices)
-10. [API Reference](#api-reference)
+6. [Load-Once Semantics and Ad Lifecycle](#load-once-semantics-and-ad-lifecycle)
+7. [Loading Native Ad Views](#loading-native-ad-views)
+8. [Recycling Container Integration](#recycling-container-integration)
+9. [Ad Theming and Customization](#ad-theming-and-customization)
+10. [Regulations](#regulations)
+11. [Troubleshooting](#troubleshooting)
+12. [Best Practices](#best-practices)
+13. [API Reference](#api-reference)
 
 ---
 
@@ -57,10 +60,10 @@ The Velocity Ads SDK is distributed via **Swift Package Manager**.
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Choose the version rule (e.g. "Up to Next Major" starting from `0.2.0`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" starting from `0.3.0`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
 
-The package uses a binary target hosted on GitHub Releases. Each release (e.g. `0.2.0`) provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
+The package uses a binary target hosted on GitHub Releases. Each release (e.g. `0.3.0`) provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
 
 ---
 
@@ -82,6 +85,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 }
 
+@MainActor
 class MyInitDelegate: VelocityAdsInitDelegate {
     func onInitSuccess() {
         print("SDK initialized successfully")
@@ -115,6 +119,8 @@ struct MyApp: App {
 }
 ```
 
+> **Threading:** All `VelocityAdsInitDelegate` callbacks are delivered on the **main thread**. The protocol is annotated `@MainActor` to express this guarantee to the Swift type system. Conform your delegate class with `@MainActor` so you can update your UI directly from callbacks. `UIViewController` and `UIApplicationDelegate` are already `@MainActor`-isolated by default.
+
 For best performance, call `VelocityAds.setUserId(_:)` before `VelocityAds.initSDK(...)` when a user identifier is available.
 
 **Important:**
@@ -128,49 +134,111 @@ The SDK provides a method for loading native ads:
 - **`VelocityNativeAdRequest`** — Immutable request object built via a fluent builder. Holds all targeting context.
 - **`VelocityNativeAd`** — The ad object. Create one from a request and call `loadAd(delegate:)` to trigger loading. Ad properties (`title`, `description`, etc.) are populated when `onAdLoaded` is called.
 
+> **Threading:** All `VelocityNativeAdDelegate` callbacks are always delivered on the **main thread** — you can update your UI directly without dispatching. The protocol is annotated `@MainActor` to express this guarantee to the Swift type system. If you build with **Swift 6** or with `SWIFT_STRICT_CONCURRENCY = complete`, your conforming type must be `@MainActor`-isolated (e.g. `UIViewController` already is); otherwise the compiler will emit an error. Under Swift 5 without strict concurrency, no annotation is required, but adding it is recommended.
+
 ```swift
-// 1. Build the request
-let adRequest = VelocityNativeAdRequest.Builder()
-    .withPrompt("What's the weather today?")              // Optional
-    .withAIResponse("The weather is sunny with 72°F...")  // Optional: improves targeting
-    .withConversationHistory(nil)                         // Optional
-    .withAdditionalContext(nil)                           // Optional
-    .withAdUnitId("ad_unit_123")                          // Optional
-    .build()
+@MainActor
+class MyViewController: UIViewController, VelocityNativeAdDelegate {
 
-// 2. Create the ad object and load
-let nativeAd = VelocityNativeAd(adRequest)
-nativeAd.loadAd(delegate: self)
+    func loadAd() {
+        // 1. Build the request
+        let adRequest = VelocityNativeAdRequest.Builder()
+            .withPrompt("What's the weather today?")              // Optional: Provide for context
+            .withAIResponse("The weather is sunny with 72°F...")  // Optional: Provide for better targeting
+            .withConversationHistory(nil)                         // Optional: Previous conversation
+            .withAdditionalContext(nil)                           // Optional: Extra context
+            .withAdUnitId("ad_unit_123")                          // Optional: Ad unit identifier
+            .build()
 
-// VelocityNativeAdDelegate implementation
-func onAdLoaded(nativeAd: VelocityNativeAd) {
-    // Ad properties are now available
-    // Display ad manually
-    titleLabel.text = nativeAd.title
-    descriptionLabel.text = nativeAd.description
-    ctaButton.setTitle(nativeAd.callToAction, for: .normal)
+        // 2. Create the ad object and load
+        let nativeAd = VelocityNativeAd(adRequest)
+        nativeAd.loadAd(delegate: self)
+    }
 
-    // Load image (e.g. with URLSession or a library like SDWebImage)
-    loadImage(from: nativeAd.imageUrl, into: adImageView)
+    func onAdLoaded(nativeAd: VelocityNativeAd) {
+        guard let data = nativeAd.data else { return }
 
-    // Handle click
-    ctaButton.addAction(UIAction { [weak self] _ in
-        if let url = URL(string: nativeAd.clickUrl) {
-            UIApplication.shared.open(url)
+        // Ad properties are now available
+        // Display ad manually
+        titleLabel.text = data.title
+        descriptionLabel.text = data.description
+        ctaButton.setTitle(data.callToAction, for: .normal)
+
+        // Load image (e.g. with URLSession or a library like SDWebImage)
+        if let imageUrl = data.largeImageUrl ?? data.squareImageUrl {
+            loadImage(from: imageUrl, into: adImageView)
         }
-    }, for: .touchUpInside)
 
-    // Track impression
-    trackImpression(nativeAd.impressionUrl)
+        // Register for automatic impression tracking and click handling.
+        // The SDK will track impressions when the ad becomes visible and
+        // open the click URL when the user taps a clickable view.
+        nativeAd.registerViewForInteraction(
+            adView: adContainerView,
+            clickableViews: [ctaButton, adImageView]
+        )
+    }
+
+    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
+        print("Failed to load ad: \(error)")
+    }
+
+    func onAdImpression(nativeAd: VelocityNativeAd) {
+        // Fires once when the ad is first shown and the impression is recorded
+    }
+
+    func onAdClicked(nativeAd: VelocityNativeAd) {
+        // Fired when the user taps the ad (SDK handles opening the click URL)
+    }
+}
+```
+
+> **Note:** `onAdImpression` and `onAdClicked` have default no-op implementations via a protocol extension, so you can omit them if you don't need impression/click tracking in your delegate implementation.
+
+### Automatic Impression and Click Tracking
+
+For UIKit apps using manual rendering, call `registerViewForInteraction` after loading the ad to enable automatic impression and click tracking:
+
+```swift
+func onAdLoaded(nativeAd: VelocityNativeAd) {
+    guard let data = nativeAd.data else { return }
+
+    // Set up your ad views...
+    titleLabel.text = data.title
+    descriptionLabel.text = data.description
+
+    // Register the container view for automatic impression tracking
+    // and specify which views are clickable
+    nativeAd.registerViewForInteraction(
+        adView: adContainerView,                  // View to track for impressions
+        clickableViews: [ctaButton, adImageView]  // Tappable views
+    )
 }
 
-func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
-    print("Failed to load ad: \(error)")
+// When the delegate callbacks fire:
+func onAdImpression(nativeAd: VelocityNativeAd) {
+    print("Ad impression tracked automatically")
 }
 
-func onAdImpression(nativeAd: VelocityNativeAd) {}
+func onAdClicked(nativeAd: VelocityNativeAd) {
+    print("User clicked the ad - SDK opens click URL automatically")
+}
+```
 
-func onAdClicked(nativeAd: VelocityNativeAd) {}
+**For SwiftUI apps**, use the `.velocityAdTracking(_:)` modifier instead:
+
+```swift
+struct AdCardView: View {
+    let nativeAd: VelocityNativeAd
+
+    var body: some View {
+        VStack {
+            Text(nativeAd.data?.title ?? "")
+            Text(nativeAd.data?.description ?? "")
+            // ... render ad content
+        }
+        .velocityAdTracking(nativeAd)  // Enables automatic tracking
+    }
+}
 ```
 
 ### Conversation History
@@ -206,148 +274,707 @@ nativeAd2.loadAd(delegate: self)
 
 ---
 
-## Integration Examples
+## Load-Once Semantics and Ad Lifecycle
 
-### Example 1: Chat Application
+A `VelocityNativeAd` instance has a **one-way lifecycle**: create → load once → use → destroy.
+
+```
+Created → loadAd() → Loading → success → Loaded → destroyAd() → Destroyed (terminal)
+                                ↓
+                              failure (retry allowed)
+```
+
+- **Load once:** After a successful load, calling `loadAd()` again on the same instance returns `VelocityAdsErrorCode.adAlreadyLoaded` (`2008`). Create a new `VelocityNativeAd` instance for each ad placement.
+- **Retry on failure:** If a load fails, you may call `loadAd()` again on the same instance.
+- **Terminal after destroy:** After `destroyAd()`, the instance is inert. `loadAd()` returns `adAlreadyLoaded`; `createAdView()` / `createAdSwiftUIView()` return `nil`; `configureAdView()` / `registerViewForInteraction()` are no-ops.
+- **`adRequest` remains readable** after destroy (it is a `let` constant), but **`data` is set to `nil`** by `destroyAd()`. The instance should not be used further.
+
+---
+
+## Loading Native Ad Views
+
+The SDK can render ad views for you — no custom UI needed. To use this path, load with `VelocityNativeAdViewRequest` instead of the base `VelocityNativeAdRequest`. The view request adds two parameters:
+
+- **`adViewSize`** (required) — tells the server which layout template to select (`.S`, `.M`, or `.L`).
+- **`configuration`** (optional) — controls theming (colors, typography, dark mode). See [Ad Theming and Customization](#ad-theming-and-customization).
+
+After a successful load, call `createAdView()` or `createAdSwiftUIView()` to get a self-contained view with built-in impression and click tracking.
+
+### `VelocityNativeAdViewRequest`
+
+Build the request using the fluent builder. The only required argument is `adViewSize`; all other parameters are optional and inherited from `VelocityNativeAdRequest`.
+
+```swift
+let adRequest = VelocityNativeAdViewRequest.Builder(adViewSize: .M)
+    .withPrompt("Best noise-cancelling headphones")                 // Optional: Provide for context
+    .withAIResponse("The Sony WH-1000XM5 offers excellent ANC...")  // Optional: Provide for better targeting
+    .withConversationHistory(conversationHistory)                   // Optional: Previous conversation
+    .withAdditionalContext("electronics, audio")                    // Optional: Extra context
+    .withAdUnitId("chat_ad_unit")                                   // Optional: Ad unit identifier
+    .withAdViewConfiguration(AdViewConfiguration(
+        colorScheme: AdColorScheme.Builder()
+            .light { $0.copy(ctaBackground: .systemBlue) }
+            .build()
+    ))
+    .build()
+
+let nativeAd = VelocityNativeAd(adRequest)
+nativeAd.loadAd(delegate: self)
+```
+
+| Size | Constant | Height |
+|------|----------|--------|
+| Small | `.S` | 50 pt |
+| Medium | `.M` | 100 pt |
+| Large | `.L` | 300 pt |
+
+> **Choosing a size:** Pick the size that best fits your layout. The server uses the size to select the right creative template; changing the size after load requires a new `VelocityNativeAd` instance.
+
+### Creating Ad Views
+
+After a successful `loadAd(delegate:)` call, create SDK-rendered views on demand. This separates the expensive network load from the cheap view creation — the key to efficient cell recycling.
+
+Views return `nil` if the request was a plain `VelocityNativeAdRequest`, if `loadAd` has not yet succeeded, or if the instance has been destroyed via `destroyAd()`.
+
+#### `createAdView() -> VelocityNativeAdView?`
+
+Creates a pre-built UIKit ad view. Impression and click tracking are handled automatically inside the returned view.
+
+```swift
+func onAdLoaded(nativeAd: VelocityNativeAd) {
+    guard let adView = nativeAd.createAdView() else { return }
+    adContainer.addSubview(adView)
+    NSLayoutConstraint.activate([
+        adView.leadingAnchor.constraint(equalTo: adContainer.leadingAnchor),
+        adView.trailingAnchor.constraint(equalTo: adContainer.trailingAnchor),
+        adView.topAnchor.constraint(equalTo: adContainer.topAnchor),
+        adView.bottomAnchor.constraint(equalTo: adContainer.bottomAnchor),
+    ])
+}
+```
+
+#### `createAdSwiftUIView() -> AnyView?`
+
+Creates a pre-built SwiftUI ad view. No `UIViewRepresentable` bridging needed — embed it directly.
+
+```swift
+func onAdLoaded(nativeAd: VelocityNativeAd) {
+    self.adView = nativeAd.createAdSwiftUIView()
+}
+```
+
+**Return value:** Both `createAdView()` and `createAdSwiftUIView()` return `nil` if:
+- The ad data has not been loaded yet (before `onAdLoaded`).
+- The `adRequest` was a plain `VelocityNativeAdRequest` instead of `VelocityNativeAdViewRequest`.
+- The instance has been destroyed via `destroyAd()`.
+
+> **Note:** Publishers using the manual rendering path (`VelocityNativeAdRequest`) do not call `createAdView` or `createAdSwiftUIView`. Use `registerViewForInteraction(adView:clickableViews:)` instead to wire impression and click tracking.
+
+---
+
+## Recycling Container Integration
+
+Loading ad data once and reusing a single view across recycled cells dramatically reduces memory usage. The SDK supports six integration patterns — two rendering paths (manual vs SDK-rendered) crossed with three host environments. This section documents the expected publisher behavior for each.
+
+### Supported Containers
+
+| Container Type | Recycling Mechanism |
+|---|---|
+| `UITableView` | `dequeueReusableCell(_:for:)` + `prepareForReuse` |
+| `UICollectionView` | `dequeueReusableCell(withReuseIdentifier:for:)` + `prepareForReuse` |
+| SwiftUI `LazyVStack`, `LazyHStack`, `LazyVGrid`, `LazyHGrid`, `List` | SwiftUI view identity via `ForEach` + `.id()` |
+
+UIKit examples apply to both `UITableView` and `UICollectionView` — the cell lifecycle is identical. SwiftUI examples apply to all lazy containers.
+
+### `configureAdView(_ adView: VelocityNativeAdView)`
+
+Reconfigures an existing SDK-rendered `VelocityNativeAdView` with new ad data. The view's layout is reused — only the ad content is swapped. This is the key to efficient UIKit cell recycling with SDK-rendered views (Pattern 3).
+
+```swift
+if let existingAdView = cell.adView {
+    nativeAd.configureAdView(existingAdView)
+}
+```
+
+Internally, `configureAdView` updates all displayed fields, resets the impression tracker when the ad identity changes, and re-wires the click URL. No `prepareForReuse` cleanup is needed — teardown is handled automatically.
+
+---
+
+### Pattern 1: Manual Rendering (UIKit Recycling Container)
+
+Use `VelocityNativeAdRequest` to load ad data. The publisher builds custom UI from `nativeAd.data`. Pre-load ads before binding to cells. Call `registerViewForInteraction` in `cellForRowAt` and `unregisterViewForInteraction` in `prepareForReuse`.
 
 ```swift
 import UIKit
 import VelocityAdsSDK
 
-class ChatViewController: UIViewController, VelocityNativeAdDelegate {
-    private var conversationHistory: [[String: Any]] = []
+@MainActor
+class ChatViewController: UIViewController, UITableViewDataSource, VelocityNativeAdDelegate {
+    private var messages: [ChatItem] = []
+    private var nativeAds: [UUID: VelocityNativeAd] = [:]
 
-    private func onUserMessage(_ userMessage: String) {
-        // Get AI response
-        getAIResponse(userMessage) { [weak self] aiResponse in
-            guard let self = self else { return }
-            // Display AI response
-            self.displayMessage(aiResponse)
+    private func loadAdForMessage(_ messageId: UUID, prompt: String, aiResponse: String?) {
+        let adRequest = VelocityNativeAdRequest.Builder()
+            .withPrompt(prompt)
+            .withAIResponse(aiResponse)
+            .build()
 
-            // Load contextual ad with conversation history
-            self.loadContextualAd(prompt: userMessage, aiResponse: aiResponse)
+        let nativeAd = VelocityNativeAd(adRequest)
+        nativeAds[messageId] = nativeAd
+        nativeAd.loadAd(delegate: self)
+    }
 
-            // Add to conversation history after successful ad load
-            self.conversationHistory.append(["role": "user", "content": userMessage])
-            self.conversationHistory.append(["role": "assistant", "content": aiResponse])
+    func onAdLoaded(nativeAd: VelocityNativeAd) {
+        tableView.reloadData()
+    }
+
+    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
+        print("Ad load failed: \(error)")
+    }
+
+    func onAdImpression(nativeAd: VelocityNativeAd) {}
+    func onAdClicked(nativeAd: VelocityNativeAd) {}
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let item = messages[indexPath.row]
+        guard case .ad(let messageId) = item,
+              let nativeAd = nativeAds[messageId],
+              nativeAd.data != nil else {
+            return UITableViewCell()
+        }
+        let cell = tableView.dequeueReusableCell(
+            withIdentifier: ManualAdCell.reuseId, for: indexPath
+        ) as! ManualAdCell
+        cell.configure(with: nativeAd)
+        return cell
+    }
+}
+
+class ManualAdCell: UITableViewCell {
+    static let reuseId = "ManualAdCell"
+    private let titleLabel = UILabel()
+    private let ctaButton = UIButton()
+    private var currentAd: VelocityNativeAd?
+
+    func configure(with nativeAd: VelocityNativeAd) {
+        currentAd?.unregisterViewForInteraction()
+        currentAd = nativeAd
+        titleLabel.text = nativeAd.data?.title
+        ctaButton.setTitle(nativeAd.data?.callToAction, for: .normal)
+        nativeAd.registerViewForInteraction(adView: contentView, clickableViews: [ctaButton])
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        currentAd?.unregisterViewForInteraction()
+        currentAd = nil
+    }
+}
+```
+
+---
+
+### Pattern 2: Manual Rendering (SwiftUI Lazy Container)
+
+Use `VelocityNativeAdRequest` to load ad data. The publisher builds custom SwiftUI views from `nativeAd.data` and attaches the `.velocityAdTracking(_:)` modifier for automatic impression and click tracking. The modifier handles register/unregister automatically as views enter and leave the screen.
+
+```swift
+import SwiftUI
+import VelocityAdsSDK
+
+@MainActor
+class ManualAdViewModel: ObservableObject, VelocityNativeAdDelegate {
+    @Published var nativeAd: VelocityNativeAd?
+
+    func loadAd(prompt: String, aiResponse: String?) {
+        let adRequest = VelocityNativeAdRequest.Builder()
+            .withPrompt(prompt)
+            .withAIResponse(aiResponse)
+            .build()
+
+        let ad = VelocityNativeAd(adRequest)
+        ad.loadAd(delegate: self)
+    }
+
+    func onAdLoaded(nativeAd: VelocityNativeAd) {
+        self.nativeAd = nativeAd
+    }
+
+    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
+        print("Ad load failed: \(error)")
+    }
+}
+
+struct ManualAdCardView: View {
+    let nativeAd: VelocityNativeAd
+
+    var body: some View {
+        let data = nativeAd.data
+        VStack(alignment: .leading, spacing: 8) {
+            Text(data?.title ?? "")
+                .font(.headline)
+            Text(data?.description ?? "")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            if let cta = data?.callToAction {
+                Text(cta)
+                    .font(.callout.bold())
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(radius: 2)
+        .velocityAdTracking(nativeAd)
+    }
+}
+
+struct ChatView: View {
+    @StateObject private var viewModel = ManualAdViewModel()
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 16) {
+                ForEach(items) { item in
+                    switch item {
+                    case .ad(let nativeAd):
+                        ManualAdCardView(nativeAd: nativeAd)
+                            .padding(.horizontal)
+                    case .message(let text):
+                        Text(text)
+                    }
+                }
+            }
         }
     }
+}
+```
 
-    private func loadContextualAd(prompt: String, aiResponse: String?) {
-        // Pass conversation history (empty on first call)
-        let historyToPass = conversationHistory.isEmpty ? nil : conversationHistory
+---
 
-        let adRequest = VelocityNativeAdRequest.Builder()
+### Pattern 3: SDK-Rendered UIView (UIKit Recycling Container)
+
+Use `VelocityNativeAdViewRequest` to load ad data. Pre-load ads before binding to cells. Create the `VelocityNativeAdView` once per cell with `createAdView()`; call `configureAdView` on reuse to swap the ad data without recreating the view hierarchy. The view is retained in the cell across `prepareForReuse`.
+
+```swift
+import UIKit
+import VelocityAdsSDK
+
+@MainActor
+class FeedViewController: UIViewController, UITableViewDataSource, VelocityNativeAdDelegate {
+    private var nativeAds: [UUID: VelocityNativeAd] = [:]
+
+    private func loadAd(for messageId: UUID, prompt: String) {
+        let adRequest = VelocityNativeAdViewRequest.Builder(adViewSize: .M)
             .withPrompt(prompt)
-            .withAIResponse(aiResponse)
-            .withConversationHistory(historyToPass) // Optional conversation history
             .build()
 
         let nativeAd = VelocityNativeAd(adRequest)
+        nativeAds[messageId] = nativeAd
         nativeAd.loadAd(delegate: self)
     }
 
     func onAdLoaded(nativeAd: VelocityNativeAd) {
-        // Display ad manually using custom UI
-        displayAdManually(nativeAd)
+        tableView.reloadData()
     }
 
     func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
-        // Continue without ad
-        print("Ad load failed: \(error)")
+        print("Failed to load ad: \(error)")
     }
 
-    func onAdImpression(nativeAd: VelocityNativeAd) {}
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let item = messages[indexPath.row]
+        guard case .ad(let messageId) = item,
+              let nativeAd = nativeAds[messageId] else {
+            return UITableViewCell()
+        }
+        let cell = tableView.dequeueReusableCell(
+            withIdentifier: SDKAdCell.reuseId, for: indexPath
+        ) as! SDKAdCell
+        cell.configure(with: nativeAd)
+        return cell
+    }
+}
 
-    func onAdClicked(nativeAd: VelocityNativeAd) {}
+class SDKAdCell: UITableViewCell {
+    static let reuseId = "SDKAdCell"
+    private var adView: VelocityNativeAdView?
+
+    func configure(with nativeAd: VelocityNativeAd) {
+        if adView == nil {
+            adView = nativeAd.createAdView()
+            if let adView {
+                contentView.addSubview(adView)
+                adView.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    adView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+                    adView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+                    adView.topAnchor.constraint(equalTo: contentView.topAnchor),
+                    adView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+                ])
+            }
+        } else if let adView {
+            nativeAd.configureAdView(adView)
+        }
+    }
+    // prepareForReuse: nothing required — configureAdView handles teardown internally
 }
 ```
 
-### Example 2: Table View / Collection View Integration
+---
+
+### Pattern 4: SDK-Rendered UIView (SwiftUI Lazy Container)
+
+Use `VelocityNativeAdViewRequest` to load ad data. Cache the `VelocityNativeAdView` in `@State` so it is created once per `ForEach` identity. Wrap it in a publisher-written `UIViewRepresentable`. No `configureAdView` is needed — each ad identity keeps its own cached view.
 
 ```swift
-class AdTableViewCell: UITableViewCell {
-    static let reuseId = "AdCell"
-    private let containerView = UIView()
-    private var adDelegate: AdCellDelegate?
+import SwiftUI
+import VelocityAdsSDK
 
-    func configure(prompt: String, aiResponse: String? = nil) {
-        containerView.subviews.forEach { $0.removeFromSuperview() }
+struct AdRowView: View {
+    let nativeAd: VelocityNativeAd
+    @State private var cachedAdView: VelocityNativeAdView?
 
-        let adRequest = VelocityNativeAdRequest.Builder()
-            .withPrompt(prompt)
-            .withAIResponse(aiResponse)
-            .build()
+    init(nativeAd: VelocityNativeAd) {
+        self.nativeAd = nativeAd
+        _cachedAdView = State(initialValue: nativeAd.createAdView())
+    }
 
-        let nativeAd = VelocityNativeAd(adRequest)
-        // Retain the delegate so it is alive when the callback fires
-        adDelegate = AdCellDelegate(containerView: containerView, cell: self)
-        nativeAd.loadAd(delegate: adDelegate!)
+    var body: some View {
+        if let adView = cachedAdView {
+            SDKAdViewRepresentable(adView: adView)
+                .frame(maxWidth: .infinity)
+                .frame(height: adView.intrinsicContentSize.height)
+        }
     }
 }
 
-// Use a delegate object that holds the container; ensure it is retained until the callback
-private class AdCellDelegate: VelocityNativeAdDelegate {
-    weak var containerView: UIView?
-    weak var cell: UITableViewCell?
+struct SDKAdViewRepresentable: UIViewRepresentable {
+    let adView: VelocityNativeAdView
 
-    init(containerView: UIView, cell: UITableViewCell) {
-        self.containerView = containerView
-        self.cell = cell
+    func makeUIView(context: Context) -> VelocityNativeAdView {
+        return adView
     }
 
-    func onAdLoaded(nativeAd: VelocityNativeAd) {
-        guard let containerView = containerView else { return }
-        // Build and add ad UI to containerView
+    func updateUIView(_ uiView: VelocityNativeAdView, context: Context) {
+        uiView.setNeedsLayout()
     }
 
-    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
-        // Hide ad container or show placeholder
-        cell?.contentView.isHidden = true
+    // iOS 16+: use sizeThatFits for automatic height
+    @available(iOS 16.0, *)
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: VelocityNativeAdView,
+        context: Context
+    ) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width
+        return CGSize(width: width, height: adView.intrinsicContentSize.height)
     }
+}
 
-    func onAdImpression(nativeAd: VelocityNativeAd) {}
-
-    func onAdClicked(nativeAd: VelocityNativeAd) {}
+// Usage in a LazyVStack:
+LazyVStack {
+    ForEach(items) { item in
+        switch item {
+        case .ad(let nativeAd):
+            AdRowView(nativeAd: nativeAd)
+        case .content(let text):
+            Text(text)
+        }
+    }
 }
 ```
 
-### Example 3: Article Reader
+> **iOS 13–15 note:** `sizeThatFits` is iOS 16+. On older versions, provide an explicit `.frame(height:)` using `adView.intrinsicContentSize.height`.
+
+---
+
+### Pattern 5: SDK-Rendered SwiftUI (UIKit Recycling Container)
+
+Use `VelocityNativeAdViewRequest` to load ad data. Call `createAdSwiftUIView()` to get an `AnyView` and host it inside the cell. The recommended hosting strategy depends on the minimum iOS version you support:
+
+- **iOS 16+:** Use `UIHostingConfiguration` assigned to `cell.contentConfiguration`. This is Apple's purpose-built, lightweight API for SwiftUI content in `UITableViewCell` / `UICollectionViewCell`. No view-controller lifecycle, no manual Auto Layout — each recycle simply reassigns `contentConfiguration`.
+- **iOS 13–15 fallback:** Retain a `UIHostingController<AnyView>` as a child view controller and replace `hostingController.rootView` on reuse.
 
 ```swift
-class ArticleViewController: UIViewController, VelocityNativeAdDelegate {
+import UIKit
+import SwiftUI
+import VelocityAdsSDK
 
-    private func loadArticle(_ article: Article) {
-        // Display article content
-        titleLabel.text = article.title
-        contentLabel.text = article.content
+class SwiftUIAdCell: UITableViewCell {
+    static let reuseId = "SwiftUIAdCell"
 
-        let adRequest = VelocityNativeAdRequest.Builder()
-            .withPrompt(article.title)        // Optional
-            .withAIResponse(article.content)  // Optional
-            .build()
+    // iOS 13-15 fallback only
+    private var hostingController: UIHostingController<AnyView>?
+    private var hostingHeightConstraint: NSLayoutConstraint?
 
-        let nativeAd = VelocityNativeAd(adRequest)
-        nativeAd.loadAd(delegate: self)
+    func configure(nativeAd: VelocityNativeAd) {
+        guard let swiftUIView = nativeAd.createAdSwiftUIView() else { return }
+        let adHeight: CGFloat = (nativeAd.adRequest as? VelocityNativeAdViewRequest)?.adViewSize.heightPt ?? 100
+
+        if #available(iOS 16.0, *) {
+            contentConfiguration = UIHostingConfiguration {
+                swiftUIView
+            }
+            .margins(.all, 16)
+            .minSize(width: 0, height: adHeight)
+        } else {
+            if let hc = hostingController {
+                hc.rootView = swiftUIView
+                hostingHeightConstraint?.constant = adHeight
+            } else {
+                let hc = UIHostingController(rootView: swiftUIView)
+                hc.view.backgroundColor = .clear
+                hc.view.translatesAutoresizingMaskIntoConstraints = false
+                hostingController = hc
+
+                contentView.addSubview(hc.view)
+                let p: CGFloat = 16
+                let heightC = hc.view.heightAnchor.constraint(equalToConstant: adHeight)
+                hostingHeightConstraint = heightC
+                NSLayoutConstraint.activate([
+                    hc.view.topAnchor.constraint(equalTo: contentView.topAnchor, constant: p),
+                    hc.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -p),
+                    hc.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: p),
+                    hc.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -p),
+                    heightC,
+                ])
+            }
+        }
     }
-
-    func onAdLoaded(nativeAd: VelocityNativeAd) {
-        // Display ad manually using custom UI
-        displayAdManually(nativeAd)
-
-        // Insert ad after first paragraph
-        // (ad view would be inserted at position 1)
-    }
-
-    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
-        print("Ad load failed: \(error)")
-    }
-
-    func onAdImpression(nativeAd: VelocityNativeAd) {}
-
-    func onAdClicked(nativeAd: VelocityNativeAd) {}
+    // prepareForReuse: nothing required —
+    // iOS 16+: contentConfiguration reassignment handles teardown.
+    // iOS 13-15: hostingController is retained; rootView is replaced in the next configure call.
 }
 ```
+
+> **Note:** Unlike the UIView recycling path (Pattern 3), there is no `configureAdView` equivalent for this path. Each `createAdSwiftUIView()` call creates a new internal `VelocityNativeAdView`, so the view is replaced entirely on every recycle. On iOS 16+, `UIHostingConfiguration` avoids the view-controller lifecycle overhead, reducing per-cell cost compared to the `UIHostingController` fallback. For performance-sensitive lists with high scroll velocity, prefer Pattern 3 (SDK UIView in UIKit recycling container). Pattern 5 is best suited when you need SwiftUI rendering inside a UIKit collection and the list size is moderate.
+
+---
+
+### Pattern 6: SDK-Rendered SwiftUI (SwiftUI Lazy Container)
+
+Use `VelocityNativeAdViewRequest` to load ad data. Cache the `AnyView` in `@State` so `createAdSwiftUIView()` is called once per `ForEach` identity. Render it directly — no bridging needed.
+
+```swift
+import SwiftUI
+import VelocityAdsSDK
+
+struct SDKSwiftUIAdRow: View {
+    let nativeAd: VelocityNativeAd
+    @State private var cachedSwiftUIView: AnyView?
+
+    init(nativeAd: VelocityNativeAd) {
+        self.nativeAd = nativeAd
+        _cachedSwiftUIView = State(initialValue: nativeAd.createAdSwiftUIView())
+    }
+
+    var body: some View {
+        if let adView = cachedSwiftUIView {
+            adView
+                .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+// Usage in a LazyVStack:
+LazyVStack {
+    ForEach(items) { item in
+        switch item {
+        case .ad(let nativeAd):
+            SDKSwiftUIAdRow(nativeAd: nativeAd)
+        case .content(let text):
+            Text(text)
+        }
+    }
+}
+```
+
+---
+
+### Cell Lifecycle Summary
+
+#### UIKit Recycling Containers (`UITableView` / `UICollectionView`)
+
+| Lifecycle Event | Pattern 1: Manual | Pattern 3: SDK UIView | Pattern 5: SDK SwiftUI |
+|---|---|---|---|
+| `cellForRowAt` — first use | Populate UI from `nativeAd.data`, then `registerViewForInteraction(adView:clickableViews:)` | `createAdView()` → add to cell | `createAdSwiftUIView()` → assign `UIHostingConfiguration` (iOS 16+) or create `UIHostingController` → add to cell (iOS 13-15) |
+| `cellForRowAt` — reused cell | Populate UI from `nativeAd.data`, then `registerViewForInteraction(adView:clickableViews:)` | `configureAdView(existingAdView)` | `createAdSwiftUIView()` → reassign `contentConfiguration` (iOS 16+) or replace `hostingController.rootView` (iOS 13-15) |
+| `prepareForReuse` | `unregisterViewForInteraction()` | Nothing required | Nothing required |
+| `didEndDisplaying` | `unregisterViewForInteraction()` (alternative to `prepareForReuse`) | Nothing required | Nothing required |
+
+#### SwiftUI Lazy Containers (`LazyVStack` / `List` / etc.)
+
+| Lifecycle Event | Pattern 2: Manual | Pattern 4: SDK UIView | Pattern 6: SDK SwiftUI |
+|---|---|---|---|
+| View appears | `.velocityAdTracking()` auto-registers via `didMoveToWindow` | `@State` preserves cached `VelocityNativeAdView` | `@State` preserves cached `AnyView` |
+| View disappears | `.velocityAdTracking()` auto-unregisters via `willMove(toWindow: nil)` | Automatic via `didMoveToWindow` | Automatic via `didMoveToWindow` |
+| View identity changes | SwiftUI recreates the view; modifier wires the new ad | `@State(initialValue:)` creates a new view for the new identity | `@State(initialValue:)` creates a new view for the new identity |
+
+> **When to call `prepareForReuse` vs `unregisterViewForInteraction`:**
+> `prepareForReuse` is called by UIKit just before a cell is dequeued and handed to the next `cellForRowAt` call. For **manual rendering** (Pattern 1), call `unregisterViewForInteraction()` there to stop the visibility timer and remove gesture recognizers from the old ad. For **SDK-rendered views** (Patterns 3 and 5), teardown is handled internally — no publisher action needed in `prepareForReuse`.
+
+---
+
+## Ad Theming and Customization
+
+When using `VelocityNativeAdViewRequest`, you can fully customize the ad card appearance via `AdViewConfiguration`.
+
+
+### Custom Colors
+
+```swift
+let config = AdViewConfiguration(
+    colorScheme: AdColorScheme.Builder()
+        .light { $0.copy(
+            ctaBackground: UIColor(red: 0.38, green: 0.0, blue: 0.93, alpha: 1.0),
+            ctaText: .white,
+            cardBackground: UIColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1.0)
+        )}
+        .dark { $0.copy(
+            ctaBackground: UIColor(red: 0.62, green: 0.31, blue: 0.93, alpha: 1.0),
+            ctaText: .white,
+            cardBackground: UIColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1.0)
+        )}
+        .build()
+)
+
+let adRequest = VelocityNativeAdViewRequest.Builder(adViewSize: .M)
+    .withPrompt("...")
+    .withAdViewConfiguration(config)
+    .build()
+
+let nativeAd = VelocityNativeAd(adRequest)
+nativeAd.loadAd(delegate: self)
+```
+
+#### Available Color Tokens
+
+| Token | Description |
+|-------|-------------|
+| `cardBackground` | Ad card surface color |
+| `titleText` | Title text color |
+| `descriptionText` | Description text color |
+| `brandText` | Advertiser brand name color |
+| `brandIconBorder` | Advertiser brand icon border color |
+| `sponsoredLabelText` | "Sponsored" label text color |
+| `sponsoredBadgeBackground` | Badge background (e.g. "ad" pill) |
+| `sponsoredBadgeText` | Badge text color |
+| `ctaBackground` | CTA button background |
+| `ctaText` | CTA button text color |
+| `chevronIconTint` | Chevron icon tint |
+
+### Custom Typography
+
+```swift
+let config = AdViewConfiguration(
+    typography: AdTypography.Builder(selectedSize: .M)
+        .title { $0.copy(fontSize: 18, fontWeight: .bold) }
+        .description { $0.copy(fontSize: 14) }
+        .ctaButton { $0.copy(fontWeight: .semibold) }
+        .build()
+)
+```
+
+#### Available Typography Tokens
+
+| Token | Description |
+|-------|-------------|
+| `brandName` | Advertiser brand name |
+| `sponsoredLabel` | "Sponsored" label |
+| `sponsoredBadgeText` | "ad" badge label |
+| `title` | Ad title |
+| `description` | Ad body text |
+| `ctaButton` | CTA button text |
+
+### Dark Theme Override
+
+By default the SDK follows the system dark mode setting. Override it explicitly:
+
+```swift
+let config = AdViewConfiguration(
+    darkTheme: false      // Force light mode
+    // darkTheme: true    // Force dark mode
+    // darkTheme: nil     // Follow system (default)
+)
+```
+
+### Combining All Options
+
+```swift
+let config = AdViewConfiguration(
+    colorScheme: AdColorScheme.Builder()
+        .light { $0.copy(ctaBackground: UIColor(red: 0.38, green: 0.0, blue: 0.93, alpha: 1.0)) }
+        .build(),
+    typography: AdTypography.Builder(selectedSize: .M)
+        .title { $0.copy(fontSize: 18) }
+        .build(),
+    darkTheme: nil
+)
+
+let adRequest = VelocityNativeAdViewRequest.Builder(adViewSize: .M)
+    .withPrompt("Best running shoes")
+    .withAdViewConfiguration(config)
+    .build()
+
+let nativeAd = VelocityNativeAd(adRequest)
+nativeAd.loadAd(delegate: self)
+```
+
+---
+
+## Regulations
+
+### CCPA "Do Not Sell" Implementation
+
+If your app serves users in regions where CCPA applies, you must provide a way for users to opt out of the sale of their personal information.
+
+#### API Details
+
+**Method:** `VelocityAds.setDoNotSell(_:)`
+
+**Parameters:**
+- `doNotSell` (`Bool`) - `true` if the user opts out of the sale of personal information, `false` if the user allows data sharing
+
+**Example:**
+
+```swift
+// User opts out of data sale (CCPA)
+VelocityAds.setDoNotSell(true)
+
+// User allows data sharing
+VelocityAds.setDoNotSell(false)
+```
+
+- ⚠️ **Geography-Specific:** Only call this API in regions where CCPA regulations apply.
+
+### GDPR Consent Implementation
+
+If your app serves users in the European Economic Area (EEA), UK, or other regions where GDPR applies, you must obtain user consent before processing their personal data.
+
+#### API Details
+
+**Method:** `VelocityAds.setConsent(_:)`
+
+**Parameters:**
+- `consent` (`Bool`) - `true` if the user gives consent for data processing, `false` if the user denies consent
+
+**Example:**
+
+```swift
+// User gives consent (GDPR)
+VelocityAds.setConsent(true)
+
+// User denies consent
+VelocityAds.setConsent(false)
+```
+
+- ⚠️ **Geography-Specific:** Only call this API in regions where GDPR regulations apply.
 
 ---
 
@@ -367,6 +994,7 @@ Initialize at startup and only load ads after initialization succeeds. This avoi
 let initRequest = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY").build()
 VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
 
+@MainActor
 class MyInitDelegate: VelocityAdsInitDelegate {
     func onInitSuccess() {
         // SDK is ready — enable ad loading in your UI or trigger first ad load
@@ -416,6 +1044,7 @@ Example strategy:
 import Network
 import VelocityAdsSDK
 
+@MainActor
 final class SDKInitCoordinator: VelocityAdsInitDelegate {
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "sdk.init.network.monitor")
@@ -513,56 +1142,6 @@ VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
 - Ad unit not configured
 
 **Solution:** Handle `onError` gracefully (e.g. hide ad space or show fallback). The SDK continues to function even when no ads are available.
-
----
-
-## Regulations
-
-### CCPA "Do Not Sell" Implementation
-
-If your app serves users in regions where CCPA applies, you must provide a way for users to opt out of the sale of their personal information.
-
-#### API Details
-
-**Method:** `VelocityAds.setDoNotSell(_:)`
-
-**Parameters:**
-- `doNotSell` (`Bool`) - `true` if the user opts out of the sale of personal information, `false` if the user allows data sharing
-
-**Example:**
-
-```swift
-// User opts out of data sale (CCPA)
-VelocityAds.setDoNotSell(true)
-
-// User allows data sharing
-VelocityAds.setDoNotSell(false)
-```
-
-- ⚠️ **Geography-Specific:** Only call this API in regions where CCPA regulations apply.
-
-### GDPR Consent Implementation
-
-If your app serves users in the European Economic Area (EEA), UK, or other regions where GDPR applies, you must obtain user consent before processing their personal data.
-
-#### API Details
-
-**Method:** `VelocityAds.setConsent(_:)`
-
-**Parameters:**
-- `consent` (`Bool`) - `true` if the user gives consent for data processing, `false` if the user denies consent
-
-**Example:**
-
-```swift
-// User gives consent (GDPR)
-VelocityAds.setConsent(true)
-
-// User denies consent
-VelocityAds.setConsent(false)
-```
-
-- ⚠️ **Geography-Specific:** Only call this API in regions where GDPR regulations apply.
 
 ---
 
@@ -669,16 +1248,193 @@ nativeAd.loadAd(delegate: VelocityNativeAdDelegate)
 - `adUnitId` - Ad unit identifier (optional)
 
 **`VelocityNativeAd` properties (available after `onAdLoaded`):**
-- `adId` (`String`) - Unique ad identifier
-- `title` (`String`) - Ad title/headline
-- `description` (`String`) - Ad body text
-- `callToAction` (`String`) - CTA button text (e.g., "Learn More")
-- `sponsoredBy` (`String`) - Advertiser/sponsor name
-- `imageUrl` (`String`) - Ad image URL
-- `clickUrl` (`String`) - Destination URL when ad is clicked
-- `impressionUrl` (`String`) - URL to track ad impressions
+
+Ad creative data is accessed via `nativeAd.data` (type `NativeAd?`, non-nil after a successful load):
+
+- `nativeAd.data?.adId` (`String`) - Unique ad identifier
+- `nativeAd.data?.title` (`String`) - Ad title/headline
+- `nativeAd.data?.description` (`String`) - Ad body text
+- `nativeAd.data?.callToAction` (`String`) - CTA button text (e.g., "Learn More")
+- `nativeAd.data?.advertiserName` (`String`) - Advertiser/brand name
+- `nativeAd.data?.sponsoredLabel` (`String`) - Sponsorship label (e.g., "Sponsored")
+- `nativeAd.data?.badgeLabel` (`String`) - Badge text (e.g., "ad")
+- `nativeAd.data?.advertiserIconUrl` (`String`) - Advertiser logo/icon URL
+- `nativeAd.data?.largeImageUrl` (`String?`) - Landscape hero image URL (optional)
+- `nativeAd.data?.squareImageUrl` (`String?`) - Square (1:1) image URL (optional)
+- `nativeAd.data?.clickUrl` (`String`) - Destination URL when ad is clicked
+- `nativeAd.data?.impressionUrl` (`String`) - URL to track ad impressions
+
+#### `VelocityNativeAdViewRequest`
+
+Extends `VelocityNativeAdRequest` with size and theming for SDK-rendered ad views. Required to use `createAdView()` and `createAdSwiftUIView()`. The size is sent to the server at load time so it can select the correct template.
+
+```swift
+VelocityNativeAdViewRequest.Builder(adViewSize: VelocityNativeAdViewSize)
+    .withPrompt(_ prompt: String?)                           // Optional: Provide for context
+    .withAIResponse(_ aiResponse: String?)                   // Optional: Provide for better targeting
+    .withConversationHistory(_ history: [[String: Any]]?)    // Optional: Previous conversation
+    .withAdditionalContext(_ context: String?)               // Optional: Extra context
+    .withAdUnitId(_ adUnitId: String?)                       // Optional: Ad unit identifier
+    .withAdViewConfiguration(_ config: AdViewConfiguration)  // Optional: See Ad Theming
+    .build() -> VelocityNativeAdViewRequest
+```
+
+#### `VelocityNativeAd` — View Lifecycle Methods
+
+```swift
+// Create SDK-rendered views (requires VelocityNativeAdViewRequest and a successful load)
+nativeAd.createAdView() -> VelocityNativeAdView?
+nativeAd.createAdSwiftUIView() -> AnyView?
+
+// Reconfigure an existing SDK-rendered view for cell recycling
+nativeAd.configureAdView(_ adView: VelocityNativeAdView)
+
+// Manual rendering interaction tracking
+nativeAd.registerViewForInteraction(adView: UIView, clickableViews: [UIView])
+nativeAd.unregisterViewForInteraction()
+
+// Teardown (terminal — instance cannot be reloaded after this call)
+nativeAd.destroyAd()
+```
 
 ### Models
+
+#### `NativeAd` (ad creative data)
+
+Accessed via `VelocityNativeAd.data` after a successful load with `VelocityNativeAdDelegate`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `adId` | `String` | Unique ad load identifier |
+| `title` | `String` | Ad headline |
+| `description` | `String` | Ad body text |
+| `callToAction` | `String` | CTA button text (e.g. "Learn More") |
+| `advertiserName` | `String` | Advertiser/brand name |
+| `sponsoredLabel` | `String` | Sponsorship label (e.g. "Sponsored") |
+| `badgeLabel` | `String` | Badge text (e.g. "ad") |
+| `advertiserIconUrl` | `String` | Advertiser logo/icon URL |
+| `largeImageUrl` | `String?` | Main (landscape) ad image URL (optional) |
+| `squareImageUrl` | `String?` | Square ad image URL (optional) |
+| `clickUrl` | `String` | URL opened on ad click |
+| `impressionUrl` | `String` | Impression tracking URL |
+| `adTemplateId` | `AdTemplateId?` | Layout template variant (optional) |
+
+#### `VelocityNativeAdViewSize`
+
+```swift
+public enum VelocityNativeAdViewSize {
+    case S  // Small — 50pt height
+    case M  // Medium — 100pt height
+    case L  // Large — 300pt height
+}
+```
+
+#### `AdViewConfiguration`
+
+```swift
+public struct AdViewConfiguration {
+    public var colorScheme: AdColorScheme?   // nil = SDK default
+    public var typography: AdTypography?     // nil = SDK default
+    public var darkTheme: Bool?              // nil = follow system
+
+    public init(
+        colorScheme: AdColorScheme? = nil,
+        typography: AdTypography? = nil,
+        darkTheme: Bool? = nil
+    )
+}
+```
+
+#### `AdColorScheme`
+
+```swift
+public struct AdColorScheme {
+    public let light: AdColors
+    public let dark: AdColors
+
+    public init(light: AdColors = .light, dark: AdColors = .dark)
+
+    public final class Builder {
+        public init(base: AdColorScheme = AdColorScheme())
+
+        // Configure via transform block (receives current palette, return modified copy):
+        @discardableResult public func light(_ block: (AdColors) -> AdColors) -> Builder
+        @discardableResult public func dark(_ block: (AdColors) -> AdColors) -> Builder
+
+        // Or replace entire palette:
+        @discardableResult public func light(_ colors: AdColors) -> Builder
+        @discardableResult public func dark(_ colors: AdColors) -> Builder
+
+        public func build() -> AdColorScheme
+    }
+}
+```
+
+#### `AdColors`
+
+```swift
+public struct AdColors {
+    public let cardBackground: UIColor
+    public let sponsoredLabelText: UIColor
+    public let titleText: UIColor
+    public let descriptionText: UIColor
+    public let brandText: UIColor
+    public let sponsoredBadgeBackground: UIColor
+    public let sponsoredBadgeText: UIColor
+    public let ctaBackground: UIColor
+    public let ctaText: UIColor
+    public let chevronIconTint: UIColor
+    public let brandIconBorder: UIColor
+
+    // Returns a copy with only the specified tokens replaced:
+    public func copy(
+        cardBackground: UIColor? = nil,
+        sponsoredLabelText: UIColor? = nil,
+        titleText: UIColor? = nil,
+        descriptionText: UIColor? = nil,
+        brandText: UIColor? = nil,
+        sponsoredBadgeBackground: UIColor? = nil,
+        sponsoredBadgeText: UIColor? = nil,
+        ctaBackground: UIColor? = nil,
+        ctaText: UIColor? = nil,
+        chevronIconTint: UIColor? = nil,
+        brandIconBorder: UIColor? = nil
+    ) -> AdColors
+
+    public static let light: AdColors  // SDK default light palette
+    public static let dark: AdColors   // SDK default dark palette
+}
+```
+
+#### `AdTypography`
+
+```swift
+public struct AdTypography {
+    public final class Builder {
+        // Seeds from SDK defaults for the given size:
+        public init(selectedSize: VelocityNativeAdViewSize)
+
+        // Each block receives the current default FontStyle, return a modified copy:
+        @discardableResult public func brandName(_ block: (FontStyle) -> FontStyle) -> Builder
+        @discardableResult public func sponsoredLabel(_ block: (FontStyle) -> FontStyle) -> Builder
+        @discardableResult public func sponsoredBadgeText(_ block: (FontStyle) -> FontStyle) -> Builder
+        @discardableResult public func title(_ block: (FontStyle) -> FontStyle) -> Builder
+        @discardableResult public func description(_ block: (FontStyle) -> FontStyle) -> Builder
+        @discardableResult public func ctaButton(_ block: (FontStyle) -> FontStyle) -> Builder
+
+        public func build() -> AdTypography
+    }
+}
+
+public struct FontStyle {
+    public let fontSize: CGFloat
+    public let fontWeight: UIFont.Weight
+
+    public init(fontSize: CGFloat, fontWeight: UIFont.Weight = .regular)
+
+    public func copy(fontSize: CGFloat? = nil, fontWeight: UIFont.Weight? = nil) -> FontStyle
+}
+```
 
 #### `VelocityAdsInitRequest`
 
@@ -705,48 +1461,56 @@ public struct VelocityAdsError: Error, CustomStringConvertible {
 
 ```swift
 public enum VelocityAdsErrorCode {
-    // Network / server errors (1xxx)
-    public static let invalidURL: Int              // 1000
-    public static let networkError: Int            // 1001
-    public static let jsonParseError: Int          // 1002
-    public static let invalidResponse: Int         // 1003
-    public static let emptyResponseBody: Int       // 1004
-    public static let requestEncodingFailed: Int   // 1005
-    public static let serverErrorField: Int        // 1006
-    public static let httpFailure: Int             // 1007
+    // Server / network errors (1xxx)
+    public static let invalidURL: Int                  // 1000
+    public static let networkError: Int                // 1001
+    public static let jsonParseError: Int              // 1002
+    public static let invalidResponse: Int             // 1003
+    public static let emptyResponseBody: Int           // 1004
+    public static let serverErrorField: Int            // 1005
+    public static let httpFailure: Int                 // 1006
 
-    // SDK errors (2xxx)
-    public static let sdkNotInitialized: Int           // 2000
-    public static let sdkInitializationInProgress: Int // 2001
-    public static let loadAlreadyInProgress: Int       // 2002
-    public static let loadServiceUnavailable: Int      // 2003
-    public static let invalidAdResponse: Int           // 2004
-    public static let noFill: Int                      // 2005
+    // SDK state errors (2xxx)
+    public static let invalidAppKey: Int               // 2000
+    public static let sdkNotInitialized: Int           // 2001
+    public static let sdkInitializationInProgress: Int // 2002
+    public static let loadAlreadyInProgress: Int       // 2003
+    public static let loadServiceUnavailable: Int      // 2004
+    public static let invalidAdResponse: Int           // 2005
+    public static let noFill: Int                      // 2006
+    public static let internalError: Int               // 2007
+    public static let adAlreadyLoaded: Int             // 2008
+    public static let waterfallLoadFailed: Int         // 2009
+    public static let adDestroyed: Int                 // 2010
 }
 ```
 
 Error code behavior:
-- HTTP failures use `VelocityAdsErrorCode.httpFailure` (`1007`)
+- HTTP failures use `VelocityAdsErrorCode.httpFailure` (`1006`)
 - HTTP status details are included in `VelocityAdsError.message`
 - SDK-defined constants are centralized in `VelocityAdsErrorCode`:
 
-**Network / server errors (1xxx):**
+**Server / network errors (1xxx):**
   - `VelocityAdsErrorCode.invalidURL` (`1000`) — Malformed URL
   - `VelocityAdsErrorCode.networkError` (`1001`) — Network request failed
   - `VelocityAdsErrorCode.jsonParseError` (`1002`) — Response JSON could not be parsed
   - `VelocityAdsErrorCode.invalidResponse` (`1003`) — Response structure is invalid
   - `VelocityAdsErrorCode.emptyResponseBody` (`1004`) — Server returned an empty body
-  - `VelocityAdsErrorCode.requestEncodingFailed` (`1005`) — Request body encoding failed
-  - `VelocityAdsErrorCode.serverErrorField` (`1006`) — Server returned an error field in the response
-  - `VelocityAdsErrorCode.httpFailure` (`1007`) — HTTP status code indicates failure
+  - `VelocityAdsErrorCode.serverErrorField` (`1005`) — Server returned an error field in the response
+  - `VelocityAdsErrorCode.httpFailure` (`1006`) — HTTP status code indicates failure
 
-**SDK errors (2xxx):**
-  - `VelocityAdsErrorCode.sdkNotInitialized` (`2000`) — `loadAd` called before `initSDK`
-  - `VelocityAdsErrorCode.sdkInitializationInProgress` (`2001`) — `loadAd` called while initialization is still in progress
-  - `VelocityAdsErrorCode.loadAlreadyInProgress` (`2002`) — `loadAd` called on an ad instance that is already loading
-  - `VelocityAdsErrorCode.loadServiceUnavailable` (`2003`) — Internal load service is not available
-  - `VelocityAdsErrorCode.invalidAdResponse` (`2004`) — Ad response is missing required data
-  - `VelocityAdsErrorCode.noFill` (`2005`) — No ad available for the given context
+**SDK state errors (2xxx):**
+  - `VelocityAdsErrorCode.invalidAppKey` (`2000`) — `appKey` is empty or blank
+  - `VelocityAdsErrorCode.sdkNotInitialized` (`2001`) — `loadAd` called before `initSDK`
+  - `VelocityAdsErrorCode.sdkInitializationInProgress` (`2002`) — `loadAd` called while initialization is still in progress
+  - `VelocityAdsErrorCode.loadAlreadyInProgress` (`2003`) — `loadAd` called on an ad instance that is already loading
+  - `VelocityAdsErrorCode.loadServiceUnavailable` (`2004`) — Internal load service is not available
+  - `VelocityAdsErrorCode.invalidAdResponse` (`2005`) — Ad response is missing required data
+  - `VelocityAdsErrorCode.noFill` (`2006`) — No ad available for the given context
+  - `VelocityAdsErrorCode.internalError` (`2007`) — Unexpected internal SDK error
+  - `VelocityAdsErrorCode.adAlreadyLoaded` (`2008`) — `loadAd` called on an instance that has already loaded successfully. Create a new `VelocityNativeAd` for a new ad placement.
+  - `VelocityAdsErrorCode.waterfallLoadFailed` (`2009`) — Waterfall load failed
+  - `VelocityAdsErrorCode.adDestroyed` (`2010`) — `loadAd` called on a destroyed instance. Create a new `VelocityNativeAd` for a new ad placement.
 
 ### Delegates
 
@@ -761,6 +1525,8 @@ protocol VelocityAdsInitDelegate: AnyObject {
 
 #### `VelocityNativeAdDelegate`
 
+Single unified delegate for all ad loading paths (data-only and SDK-rendered views).
+
 ```swift
 protocol VelocityNativeAdDelegate: AnyObject {
     func onAdLoaded(nativeAd: VelocityNativeAd)
@@ -770,7 +1536,14 @@ protocol VelocityNativeAdDelegate: AnyObject {
 }
 ```
 
+| Method | Description |
+|--------|-------------|
+| `onAdLoaded` | Main thread. Ad data is loaded. Call `createAdView()` or `createAdSwiftUIView()` for SDK-rendered views, or read `nativeAd.data` for manual rendering. |
+| `onAdFailedToLoad` | Main thread. Ad failed to load. |
+| `onAdImpression` | Fires once when the ad is shown and the impression is recorded. Default implementation is a no-op. |
+| `onAdClicked` | User tapped the ad (SDK handles opening the click URL). Default implementation is a no-op. |
+
 ---
 
-**Last Updated:** March 2026
-**SDK Version:** 0.2.0
+**Last Updated:** April 2026
+**SDK Version:** 0.3.0
