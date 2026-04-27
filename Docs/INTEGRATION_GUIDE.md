@@ -1,6 +1,6 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.3.0  
+**Version:** 0.3.1
 **Last Updated:** April 2026  
 **Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
@@ -60,10 +60,10 @@ The Velocity Ads SDK is distributed via **Swift Package Manager**.
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Choose the version rule (e.g. "Up to Next Major" starting from `0.3.0`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" starting from `0.3.1`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
 
-The package uses a binary target hosted on GitHub Releases. Each release (e.g. `0.3.0`) provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
+The package uses a binary target hosted on GitHub Releases. Each release (e.g. `0.3.1`) provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
 
 ---
 
@@ -1324,7 +1324,7 @@ Accessed via `VelocityNativeAd.data` after a successful load with `VelocityNativ
 ```swift
 public enum VelocityNativeAdViewSize {
     case S  // Small — 50pt height
-    case M  // Medium — 100pt height
+    case M  // Medium — 160pt height
     case L  // Large — 300pt height
 }
 ```
@@ -1542,8 +1542,3 @@ protocol VelocityNativeAdDelegate: AnyObject {
 | `onAdFailedToLoad` | Main thread. Ad failed to load. |
 | `onAdImpression` | Fires once when the ad is shown and the impression is recorded. Default implementation is a no-op. |
 | `onAdClicked` | User tapped the ad (SDK handles opening the click URL). Default implementation is a no-op. |
-
----
-
-**Last Updated:** April 2026
-**SDK Version:** 0.3.0
