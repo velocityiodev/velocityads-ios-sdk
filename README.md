@@ -13,7 +13,7 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
    ```
    https://github.com/velocityiodev/velocityads-ios-sdk
    ```
-3. Choose the version rule (e.g. "Up to Next Major" from `0.3.0`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" from `0.3.1`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 ---
@@ -23,7 +23,7 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.3.0'
+pod 'VelocityAdsSDK', '0.3.1'
 ```
 
 Then run:

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-04-28
+
+**Breaking Changes:**
+
+- Updated the Medium (`M`) ad view height from 100pt to 160pt.
+
 ## [0.3.0] - 2026-04-19
 
 **Features:**
@@ -14,7 +20,6 @@
 **Bug Fixes:**
 
 - Fixed an issue where the Native Ad view would sometimes not render the description text under certain conditions.
-
 
 ## [0.2.0] - 2026-03-31
 
