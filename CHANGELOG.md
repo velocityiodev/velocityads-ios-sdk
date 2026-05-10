@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0] - 2026-05-10
+
+**Features:**
+
+- **Preliminary Text** – `VelocityNativeAdRequest` now accepts an optional `includePreliminaryText(Bool)` parameter. When enabled, the server returns a short contextual snippet in `VelocityNativeAd.data?.preliminaryText` that publishers can display above the ad creative to increase relevance.
+- **Expand/Collapse Animation** – Large (`L`) ad views now support expand/collapse animation. Call `nativeAd.collapse()` or `adView.collapse()` to animate the card from 280pt to 158pt.
+- **New Color Tokens** – Added two new `AdColors` tokens: `ctaBorder` (CTA button border) and `cardBorder` (outer card border).
+
+**Breaking Changes:**
+
+- Removed `debug` option from `VelocityAdsInitRequest`.
+- Updated the Medium (`M`) ad view height from 160pt to 158pt.
+- Updated the Large (`L`) ad view height from 300pt to 280pt.
+
 ## [0.3.1] - 2026-04-28
 
 **Breaking Changes:**

@@ -1,7 +1,7 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.3.1
-**Last Updated:** April 2026  
+**Version:** 0.4.0
+**Last Updated:** May 2026  
 **Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
 
@@ -17,11 +17,12 @@
 6. [Load-Once Semantics and Ad Lifecycle](#load-once-semantics-and-ad-lifecycle)
 7. [Loading Native Ad Views](#loading-native-ad-views)
 8. [Recycling Container Integration](#recycling-container-integration)
-9. [Ad Theming and Customization](#ad-theming-and-customization)
-10. [Regulations](#regulations)
-11. [Troubleshooting](#troubleshooting)
-12. [Best Practices](#best-practices)
-13. [API Reference](#api-reference)
+9. [Collapsing Large Ads](#collapsing-large-ads)
+10. [Ad Theming and Customization](#ad-theming-and-customization)
+11. [Regulations](#regulations)
+12. [Troubleshooting](#troubleshooting)
+13. [Best Practices](#best-practices)
+14. [API Reference](#api-reference)
 
 ---
 
@@ -53,17 +54,41 @@ On iOS, access to IDFA is controlled by **App Tracking Transparency (ATT)**. You
 
 ## Installation
 
-### Swift Package Manager (SPM)
+The Velocity Ads SDK can be installed via **Swift Package Manager (SPM)** or **CocoaPods**.
 
-The Velocity Ads SDK is distributed via **Swift Package Manager**.
+> **Current version: `0.4.0`**  
+
+### Swift Package Manager (SPM)
 
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Choose the version rule (e.g. "Up to Next Major" starting from `0.3.1`) and add the package.
+3. Set the version rule to **"Exact"** and enter **`0.4.0`**, then click **Add Package**.
 4. Add the **VelocityAdsSDK** library to your app target.
 
-The package uses a binary target hosted on GitHub Releases. Each release (e.g. `0.3.1`) provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
+The package uses a binary target hosted on GitHub Releases. Each release provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
+
+---
+
+### CocoaPods
+
+1. Add the following to your `Podfile`:
+
+```ruby
+pod 'VelocityAdsSDK', '0.4.0'
+```
+
+2. Run:
+
+```bash
+pod install
+```
+
+3. Open the generated `.xcworkspace` file and import the SDK where needed:
+
+```swift
+import VelocityAdsSDK
+```
 
 ---
 
@@ -271,6 +296,57 @@ nativeAd2.loadAd(delegate: self)
 
 **Note:** The `withConversationHistory` parameter accepts an array of dictionaries (`[[String: Any]]?`). Each dictionary should have `"role"` (`"user"` or `"assistant"`) and `"content"` (message text). Update it with the full conversation history for best targeting.
 
+### Preliminary Text
+
+When `.includePreliminaryText(true)` is set on the request, the server returns a short contextual sentence in `nativeAd.data?.preliminaryText`. Display it directly above the ad — outside the ad view's frame — so it does not affect the ad's layout or height.
+
+```swift
+// Request with preliminary text enabled
+let adRequest = VelocityNativeAdRequest.Builder()
+    .withPrompt("Which running shoes are best for marathons?")
+    .withAIResponse("For marathons, I recommend ...")
+    .includePreliminaryText(true)
+    .build()
+
+let nativeAd = VelocityNativeAd(adRequest)
+nativeAd.loadAd(delegate: self)
+```
+
+After the ad loads, read and display the text above your ad UI:
+
+```swift
+func onAdLoaded(nativeAd: VelocityNativeAd) {
+    guard let data = nativeAd.data else { return }
+
+    // Display preliminary text above the ad (if available)
+    if let preliminaryText = data.preliminaryText, !preliminaryText.isEmpty {
+        preliminaryLabel.text = preliminaryText
+        preliminaryLabel.isHidden = false
+    } else {
+        preliminaryLabel.isHidden = true
+    }
+
+    // Render ad content...
+    titleLabel.text = data.title
+    descriptionLabel.text = data.description
+}
+```
+
+For SwiftUI:
+
+```swift
+VStack(alignment: .leading, spacing: 4) {
+    if let text = nativeAd.data?.preliminaryText, !text.isEmpty {
+        Text(text)
+            .font(.system(size: 14).italic())
+            .foregroundColor(.secondary)
+    }
+    // Your ad view...
+}
+```
+
+For SDK-rendered ads (`VelocityNativeAdViewRequest`), place the preliminary text above the view returned by `createAdView()` or `createAdSwiftUIView()`. The text is not rendered by the SDK — publishers are responsible for displaying it.
+
 
 ---
 
@@ -325,8 +401,8 @@ nativeAd.loadAd(delegate: self)
 | Size | Constant | Height |
 |------|----------|--------|
 | Small | `.S` | 50 pt |
-| Medium | `.M` | 100 pt |
-| Large | `.L` | 300 pt |
+| Medium | `.M` | 158 pt |
+| Large | `.L` | 280 pt |
 
 > **Choosing a size:** Pick the size that best fits your layout. The server uses the size to select the right creative template; changing the size after load requires a new `VelocityNativeAd` instance.
 
@@ -821,6 +897,77 @@ LazyVStack {
 
 ---
 
+## Collapsing Large Ads
+
+Large (`L`) ad views support an expand/collapse animation. When collapsed, the ad card shrinks to Medium height (158pt) and displays a "See more" bar with a gradient overlay at the bottom. The user can tap "See more" to expand the ad back to full height (280pt).
+
+This is useful when you want to reduce the visual footprint of an ad after it has been shown (e.g. after the user scrolls past it).
+
+### Usage
+
+Call `collapse()` on the `VelocityNativeAd` instance after the ad view has been created and attached:
+
+```swift
+nativeAd.loadAd(delegate: self)
+
+// In VelocityNativeAdDelegate.onAdLoaded:
+func onAdLoaded(nativeAd: VelocityNativeAd) {
+    guard let adView = nativeAd.createAdView() else { return }
+    container.addSubview(adView)
+
+    // Later, when you want to collapse (e.g. after the user scrolls past):
+    nativeAd.collapse()
+}
+```
+
+You can also call `collapse()` directly on the `VelocityNativeAdView`:
+
+```swift
+guard let adView = nativeAd.createAdView() else { return }
+container.addSubview(adView)
+
+// Later:
+adView.collapse()
+```
+
+### Behavior
+
+| Action | Result |
+|--------|--------|
+| `nativeAd.collapse()` or `adView.collapse()` | Animates the card from full height (280pt) to compact height (158pt) with a fade-in "See more" bar |
+| User taps "See more" | Animates back to full height; the publisher cannot programmatically expand — only the user can |
+| Calling `collapse()` on a Small or Medium ad | No-op (logs a warning) |
+| Calling `collapse()` before `createAdView()` / `configureAdView(_:)` | No-op (logs a warning) |
+
+### RecyclerView / UITableView Support
+
+The collapse state is persisted on the `VelocityNativeAd` instance. When a `UITableView` or `UICollectionView` recycles and rebinds the view via `configureAdView(_:)`, the view is restored to the correct collapsed or expanded state without animation. This means:
+
+- If the user expanded the ad, scrolled away, and scrolled back — the ad remains expanded.
+- If the publisher collapsed the ad, the user scrolled away, and scrolled back — the ad remains collapsed.
+
+### Responding to Height Changes
+
+When the ad collapses or expands, `VelocityNativeAdView.onCollapseStateChanged` fires with `true` (collapsed) or `false` (expanded). Use this to animate your container's height constraint in sync with the card animation:
+
+```swift
+adView.onCollapseStateChanged = { [weak self] isCollapsed in
+    guard let self else { return }
+    let newHeight = isCollapsed
+        ? VelocityNativeAdViewSize.largeCollapsedHeightPt
+        : VelocityNativeAdViewSize.largeExpandedHeightPt
+    UIView.animate(withDuration: 0.15) {
+        self.adViewHeightConstraint?.constant = newHeight
+        self.containerHeightConstraint?.constant = newHeight
+        self.view.layoutIfNeeded()
+    }
+}
+```
+
+This callback fires on the main thread immediately before the animation begins, so your constraint animation runs in parallel with the card's internal height animation.
+
+---
+
 ## Ad Theming and Customization
 
 When using `VelocityNativeAdViewRequest`, you can fully customize the ad card appearance via `AdViewConfiguration`.
@@ -862,11 +1009,13 @@ nativeAd.loadAd(delegate: self)
 | `descriptionText` | Description text color |
 | `brandText` | Advertiser brand name color |
 | `brandIconBorder` | Advertiser brand icon border color |
+| `cardBorder` | Ad card outer border color |
 | `sponsoredLabelText` | "Sponsored" label text color |
 | `sponsoredBadgeBackground` | Badge background (e.g. "ad" pill) |
 | `sponsoredBadgeText` | Badge text color |
 | `ctaBackground` | CTA button background |
 | `ctaText` | CTA button text color |
+| `ctaBorder` | CTA button border color |
 | `chevronIconTint` | Chevron icon tint |
 
 ### Custom Typography
@@ -1113,35 +1262,20 @@ Best practices:
 - Re-attempt init when app becomes active and network is restored.
 - Log failures and retry metadata (`attempt`, `delay`, `error.code`) for observability.
 
-#### 2. Ads Not Loading
-
-**Checklist:**
-- ✅ SDK initialized at app startup (AppDelegate or App init)
-- ✅ Network connectivity available
-- ✅ Debug mode enabled to see logs
-
-**Enable Debug Mode:**
-```swift
-let initRequest = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY")
-    .withDebug(true)
-    .build()
-VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
-```
-
-#### 3. Memory / Lifecycle
+#### 2. Memory / Lifecycle
 
 **Problem:** Using a callback that is deallocated before the callback runs (e.g. a cell that is reused).
 
-**Solution:** Retain the callback (e.g. in a dedicated object or via the view controller) until `onSuccess` or `onError` is called. Avoid using `self` from a short-lived object (e.g. table view cell) as the callback without retaining it.
+**Solution:** Retain the callback (e.g. in a dedicated object or via the view controller) until `onAdLoaded` or `onAdFailedToLoad` is called. Avoid using `self` from a short-lived object (e.g. table view cell) as the callback without retaining it.
 
-#### 4. No Ads Returned
+#### 3. No Ads Returned
 
 **Possible causes:**
 - No ads available for the given context
 - Network issues
 - Ad unit not configured
 
-**Solution:** Handle `onError` gracefully (e.g. hide ad space or show fallback). The SDK continues to function even when no ads are available.
+**Solution:** Handle `onAdFailedToLoad` gracefully (e.g. hide ad space or show fallback). The SDK continues to function even when no ads are available.
 
 ---
 
@@ -1151,7 +1285,6 @@ VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
 
 ✅ **DO:**
 - Initialize in `AppDelegate.application(_:didFinishLaunchingWithOptions:)` or in your `@main` App's `init()`
-- Enable debug mode when needed for troubleshooting (publisher's choice)
 - Handle initialization callbacks
 
 ❌ **DON'T:**
@@ -1222,7 +1355,7 @@ VelocityAds.initSDK(request, delegate: MyInitDelegate())
 ```
 
 **Parameters:**
-- `request` - Initialization request object containing required `appKey` and optional `debug`
+- `request` - Initialization request object containing required `appKey`
 - `delegate` - Initialization delegate (required)
 
 #### `VelocityNativeAdRequest` / `VelocityNativeAd`
@@ -1234,6 +1367,7 @@ let adRequest = VelocityNativeAdRequest.Builder()
     .withConversationHistory(_ history: [[String: Any]]?)
     .withAdditionalContext(_ context: String?)
     .withAdUnitId(_ adUnitId: String?)
+    .includePreliminaryText(_ include: Bool)
     .build() -> VelocityNativeAdRequest
 
 let nativeAd = VelocityNativeAd(adRequest)
@@ -1246,6 +1380,7 @@ nativeAd.loadAd(delegate: VelocityNativeAdDelegate)
 - `conversationHistory` - Conversation history for ad targeting — array of `["role": "user"/"assistant", "content": "..."]` dictionaries (optional)
 - `additionalContext` - Extra context string to improve ad relevance (optional)
 - `adUnitId` - Ad unit identifier (optional)
+- `includePreliminaryText` - When `true`, requests the server to generate a short contextual snippet ("preliminary text") that could be displayed above the ad creative. Defaults to `false`. (optional)
 
 **`VelocityNativeAd` properties (available after `onAdLoaded`):**
 
@@ -1263,6 +1398,7 @@ Ad creative data is accessed via `nativeAd.data` (type `NativeAd?`, non-nil afte
 - `nativeAd.data?.squareImageUrl` (`String?`) - Square (1:1) image URL (optional)
 - `nativeAd.data?.clickUrl` (`String`) - Destination URL when ad is clicked
 - `nativeAd.data?.impressionUrl` (`String`) - URL to track ad impressions
+- `nativeAd.data?.preliminaryText` (`String?`) - Short server-generated contextual text intended to be displayed between the AI response and the ad creative. (optional)
 
 #### `VelocityNativeAdViewRequest`
 
@@ -1275,6 +1411,7 @@ VelocityNativeAdViewRequest.Builder(adViewSize: VelocityNativeAdViewSize)
     .withConversationHistory(_ history: [[String: Any]]?)    // Optional: Previous conversation
     .withAdditionalContext(_ context: String?)               // Optional: Extra context
     .withAdUnitId(_ adUnitId: String?)                       // Optional: Ad unit identifier
+    .includePreliminaryText(_ include: Bool)                 // Optional: Request preliminary text
     .withAdViewConfiguration(_ config: AdViewConfiguration)  // Optional: See Ad Theming
     .build() -> VelocityNativeAdViewRequest
 ```
@@ -1289,6 +1426,9 @@ nativeAd.createAdSwiftUIView() -> AnyView?
 // Reconfigure an existing SDK-rendered view for cell recycling
 nativeAd.configureAdView(_ adView: VelocityNativeAdView)
 
+// Collapse the Large ad card to compact height (no-op for Small/Medium)
+nativeAd.collapse()
+
 // Manual rendering interaction tracking
 nativeAd.registerViewForInteraction(adView: UIView, clickableViews: [UIView])
 nativeAd.unregisterViewForInteraction()
@@ -1296,6 +1436,18 @@ nativeAd.unregisterViewForInteraction()
 // Teardown (terminal — instance cannot be reloaded after this call)
 nativeAd.destroyAd()
 ```
+
+#### `VelocityNativeAdView.collapse()`
+
+```swift
+func collapse()
+```
+
+Collapses this ad view to a compact preview state with animation, revealing a "See more" bar at the bottom. The user can tap "See more" to restore the full ad.
+
+Only valid for Large (`L`) ad views. Calling this on a Small or Medium view logs a warning and does nothing. If the view is already collapsed, the call is ignored.
+
+Equivalent to calling `VelocityNativeAd.collapse()` on the ad instance — use whichever reference is more convenient.
 
 ### Models
 
@@ -1318,16 +1470,25 @@ Accessed via `VelocityNativeAd.data` after a successful load with `VelocityNativ
 | `clickUrl` | `String` | URL opened on ad click |
 | `impressionUrl` | `String` | Impression tracking URL |
 | `adTemplateId` | `AdTemplateId?` | Layout template variant (optional) |
+| `preliminaryText` | `String?` | Short server-generated contextual text to display above the ad (optional — requires `includePreliminaryText(true)` on the request) |
+| `expandButton` | `String?` | Server-provided label for the "See more" expand button shown when a Large ad is collapsed. Nil means the SDK uses its default ("See more"). |
 
 #### `VelocityNativeAdViewSize`
 
 ```swift
 public enum VelocityNativeAdViewSize {
     case S  // Small — 50pt height
-    case M  // Medium — 160pt height
-    case L  // Large — 300pt height
+    case M  // Medium — 158pt height
+    case L  // Large — 280pt height
 }
 ```
+
+Use `VelocityNativeAdViewSize.largeExpandedHeightPt` and `VelocityNativeAdViewSize.largeCollapsedHeightPt` to size external containers around a collapsible Large ad without hard-coding numbers:
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `largeExpandedHeightPt` | 280 pt | Height of a Large ad card in its full expanded state |
+| `largeCollapsedHeightPt` | 158 pt | Height of a Large ad card in its collapsed preview state |
 
 #### `AdViewConfiguration`
 
@@ -1383,8 +1544,10 @@ public struct AdColors {
     public let sponsoredBadgeText: UIColor
     public let ctaBackground: UIColor
     public let ctaText: UIColor
+    public let ctaBorder: UIColor
     public let chevronIconTint: UIColor
     public let brandIconBorder: UIColor
+    public let cardBorder: UIColor
 
     // Returns a copy with only the specified tokens replaced:
     public func copy(
@@ -1397,8 +1560,10 @@ public struct AdColors {
         sponsoredBadgeText: UIColor? = nil,
         ctaBackground: UIColor? = nil,
         ctaText: UIColor? = nil,
+        ctaBorder: UIColor? = nil,
         chevronIconTint: UIColor? = nil,
-        brandIconBorder: UIColor? = nil
+        brandIconBorder: UIColor? = nil,
+        cardBorder: UIColor? = nil
     ) -> AdColors
 
     public static let light: AdColors  // SDK default light palette
@@ -1442,7 +1607,6 @@ public struct FontStyle {
 public final class VelocityAdsInitRequest {
     public final class Builder {
         public init(_ appKey: String)
-        public func withDebug(_ debug: Bool) -> Builder
         public func build() -> VelocityAdsInitRequest
     }
 }
