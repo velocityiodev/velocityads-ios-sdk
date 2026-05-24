@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0] - 2026-05-24
+
+**Features:**
+
+- Updated the iOS SDK version numbering to align with the corresponding Android SDK version for cross-platform consistency.
+
+**Breaking Changes:**
+
+- **`NativeAd` model fields removed** – The following fields have been removed from the public `NativeAd` struct (accessible via `VelocityNativeAd.data`):
+  - `id: String?`
+  - `adTemplateId: AdTemplateId?`
+  - `expandButton: String?`
+
+  If your app reads any of these fields from `nativeAd.data`, remove those references.
+
 ## [0.4.0] - 2026-05-10
 
 **Features:**
