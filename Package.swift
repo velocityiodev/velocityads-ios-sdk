@@ -11,8 +11,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "VelocityAdsSDK",
-            url: "https://github.com/velocityiodev/velocityads-ios-sdk/releases/download/0.4.0/VelocityAdsSDK-0.4.0.zip",
-            checksum: "bc1e9f39caaa4a657ebec10a3483e93675a0348effc78dd9f91e8b62d400adcc"
+            url: "https://github.com/velocityiodev/velocityads-ios-sdk/releases/download/0.6.0/VelocityAdsSDK-0.6.0.zip",
+            checksum: "be9f55ac0137e53c356e88af7e4522b299dba9df1f8b4b808589507e54e46e3f"
         ),
     ]
 )

@@ -1,6 +1,6 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.4.0
+**Version:** 0.6.0
 **Last Updated:** May 2026  
 **Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
@@ -56,14 +56,14 @@ On iOS, access to IDFA is controlled by **App Tracking Transparency (ATT)**. You
 
 The Velocity Ads SDK can be installed via **Swift Package Manager (SPM)** or **CocoaPods**.
 
-> **Current version: `0.4.0`**  
+> **Current version: `0.6.0`**  
 
 ### Swift Package Manager (SPM)
 
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Set the version rule to **"Exact"** and enter **`0.4.0`**, then click **Add Package**.
+3. Set the version rule to **"Exact"** and enter **`0.6.0`**, then click **Add Package**.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 The package uses a binary target hosted on GitHub Releases. Each release provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
@@ -75,7 +75,7 @@ The package uses a binary target hosted on GitHub Releases. Each release provide
 1. Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.4.0'
+pod 'VelocityAdsSDK', '0.6.0'
 ```
 
 2. Run:
@@ -195,8 +195,8 @@ class MyViewController: UIViewController, VelocityNativeAdDelegate {
         }
 
         // Register for automatic impression tracking and click handling.
-        // The SDK will track impressions when the ad becomes visible and
-        // open the click URL when the user taps a clickable view.
+        // The SDK tracks an impression once ≥ 50 % of the ad view is visible
+        // on screen, and opens the click URL when the user taps a clickable view.
         nativeAd.registerViewForInteraction(
             adView: adContainerView,
             clickableViews: [ctaButton, adImageView]
@@ -208,7 +208,7 @@ class MyViewController: UIViewController, VelocityNativeAdDelegate {
     }
 
     func onAdImpression(nativeAd: VelocityNativeAd) {
-        // Fires once when the ad is first shown and the impression is recorded
+        // Fires once when ≥ 50 % of the ad view is visible on screen
     }
 
     func onAdClicked(nativeAd: VelocityNativeAd) {
@@ -221,6 +221,8 @@ class MyViewController: UIViewController, VelocityNativeAdDelegate {
 
 ### Automatic Impression and Click Tracking
 
+The SDK uses a **50% viewability threshold** for impression tracking: an impression fires once at least 50% of the registered ad view is visible on screen. The SDK fires the impression exactly once, and then stops polling.
+
 For UIKit apps using manual rendering, call `registerViewForInteraction` after loading the ad to enable automatic impression and click tracking:
 
 ```swift
@@ -232,6 +234,7 @@ func onAdLoaded(nativeAd: VelocityNativeAd) {
     descriptionLabel.text = data.description
 
     // Register the container view for automatic impression tracking
+    // (impression fires when ≥ 50 % of adContainerView is visible)
     // and specify which views are clickable
     nativeAd.registerViewForInteraction(
         adView: adContainerView,                  // View to track for impressions
@@ -241,13 +244,29 @@ func onAdLoaded(nativeAd: VelocityNativeAd) {
 
 // When the delegate callbacks fire:
 func onAdImpression(nativeAd: VelocityNativeAd) {
-    print("Ad impression tracked automatically")
+    print("Ad impression tracked automatically — ≥ 50 % of the ad view was visible")
 }
 
 func onAdClicked(nativeAd: VelocityNativeAd) {
     print("User clicked the ad - SDK opens click URL automatically")
 }
 ```
+
+Call `unregisterViewForInteraction()` when the ad view is no longer in use to stop the visibility timer and remove click gesture recognizers:
+
+- **View controller teardown** — call it in `viewDidDisappear` or `deinit` if the ad is tied to a single screen.
+- **Ad replaced** — call it before calling `registerViewForInteraction` again with a different ad on the same view.
+- **Before `destroyAd()`** — unregister first if you are explicitly destroying the ad instance; `destroyAd()` itself is safe to call without it, but unregistering first is good practice.
+
+```swift
+// Example: tearing down an ad when a view controller disappears
+override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    nativeAd?.unregisterViewForInteraction()
+}
+```
+
+> **Recycling containers:** In a `UITableView` or `UICollectionView`, call `unregisterViewForInteraction()` in `prepareForReuse` (or `didEndDisplayingCell`) so the outgoing ad is cleaned up before the cell is reused. See [Recycling Container Integration](#recycling-container-integration) for full patterns.
 
 **For SwiftUI apps**, use the `.velocityAdTracking(_:)` modifier instead:
 
@@ -677,6 +696,7 @@ class FeedViewController: UIViewController, UITableViewDataSource, VelocityNativ
     }
 }
 
+@MainActor
 class SDKAdCell: UITableViewCell {
     static let reuseId = "SDKAdCell"
     private var adView: VelocityNativeAdView?
@@ -708,6 +728,8 @@ class SDKAdCell: UITableViewCell {
 
 Use `VelocityNativeAdViewRequest` to load ad data. Cache the `VelocityNativeAdView` in `@State` so it is created once per `ForEach` identity. Wrap it in a publisher-written `UIViewRepresentable`. No `configureAdView` is needed — each ad identity keeps its own cached view.
 
+Create the view in `onAppear` rather than in `init`. Swift eagerly evaluates `State(initialValue:)` arguments on every `body` re-evaluation, producing a throwaway `VelocityNativeAdView` on each re-render that overwrites the ad's internal `currentAdView` reference before being immediately discarded. The `onAppear` guard (`guard cachedAdView == nil`) ensures creation happens exactly once per `ForEach` identity.
+
 ```swift
 import SwiftUI
 import VelocityAdsSDK
@@ -716,16 +738,19 @@ struct AdRowView: View {
     let nativeAd: VelocityNativeAd
     @State private var cachedAdView: VelocityNativeAdView?
 
-    init(nativeAd: VelocityNativeAd) {
-        self.nativeAd = nativeAd
-        _cachedAdView = State(initialValue: nativeAd.createAdView())
-    }
-
     var body: some View {
-        if let adView = cachedAdView {
-            SDKAdViewRepresentable(adView: adView)
-                .frame(maxWidth: .infinity)
-                .frame(height: adView.intrinsicContentSize.height)
+        Group {
+            if let adView = cachedAdView {
+                SDKAdViewRepresentable(adView: adView)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: adView.intrinsicContentSize.height)
+            } else {
+                Color.clear.frame(height: 0)
+            }
+        }
+        .onAppear {
+            guard cachedAdView == nil else { return }
+            cachedAdView = nativeAd.createAdView()
         }
     }
 }
@@ -782,6 +807,7 @@ import UIKit
 import SwiftUI
 import VelocityAdsSDK
 
+@MainActor
 class SwiftUIAdCell: UITableViewCell {
     static let reuseId = "SwiftUIAdCell"
 
@@ -837,6 +863,8 @@ class SwiftUIAdCell: UITableViewCell {
 
 Use `VelocityNativeAdViewRequest` to load ad data. Cache the `AnyView` in `@State` so `createAdSwiftUIView()` is called once per `ForEach` identity. Render it directly — no bridging needed.
 
+As with Pattern 4, create the view in `onAppear` rather than in `init` to avoid Swift's eager `State(initialValue:)` evaluation producing throwaway views on re-renders.
+
 ```swift
 import SwiftUI
 import VelocityAdsSDK
@@ -845,15 +873,18 @@ struct SDKSwiftUIAdRow: View {
     let nativeAd: VelocityNativeAd
     @State private var cachedSwiftUIView: AnyView?
 
-    init(nativeAd: VelocityNativeAd) {
-        self.nativeAd = nativeAd
-        _cachedSwiftUIView = State(initialValue: nativeAd.createAdSwiftUIView())
-    }
-
     var body: some View {
-        if let adView = cachedSwiftUIView {
-            adView
-                .frame(maxWidth: .infinity)
+        Group {
+            if let adView = cachedSwiftUIView {
+                adView
+                    .frame(maxWidth: .infinity)
+            } else {
+                Color.clear.frame(height: 0)
+            }
+        }
+        .onAppear {
+            guard cachedSwiftUIView == nil else { return }
+            cachedSwiftUIView = nativeAd.createAdSwiftUIView()
         }
     }
 }
@@ -890,7 +921,7 @@ LazyVStack {
 |---|---|---|---|
 | View appears | `.velocityAdTracking()` auto-registers via `didMoveToWindow` | `@State` preserves cached `VelocityNativeAdView` | `@State` preserves cached `AnyView` |
 | View disappears | `.velocityAdTracking()` auto-unregisters via `willMove(toWindow: nil)` | Automatic via `didMoveToWindow` | Automatic via `didMoveToWindow` |
-| View identity changes | SwiftUI recreates the view; modifier wires the new ad | `@State(initialValue:)` creates a new view for the new identity | `@State(initialValue:)` creates a new view for the new identity |
+| View identity changes | SwiftUI recreates the view; modifier wires the new ad | `onAppear` fires for the new identity; `guard == nil` creates a new view | `onAppear` fires for the new identity; `guard == nil` creates a new view |
 
 > **When to call `prepareForReuse` vs `unregisterViewForInteraction`:**
 > `prepareForReuse` is called by UIKit just before a cell is dequeued and handed to the next `cellForRowAt` call. For **manual rendering** (Pattern 1), call `unregisterViewForInteraction()` there to stop the visibility timer and remove gesture recognizers from the old ad. For **SDK-rendered views** (Patterns 3 and 5), teardown is handled internally — no publisher action needed in `prepareForReuse`.
@@ -929,6 +960,8 @@ container.addSubview(adView)
 // Later:
 adView.collapse()
 ```
+
+> **Threading:** Both `VelocityNativeAd.collapse()` and `VelocityNativeAdView.collapse()` must be called on the main thread. `VelocityNativeAd.collapse()` is annotated `@MainActor`. Calling it from `onAdLoaded` or a UIKit action handler (e.g. an `@objc` button tap) is safe because those already run on the main thread. From a non-isolated context, dispatch via `DispatchQueue.main.async { nativeAd.collapse() }`.
 
 ### Behavior
 
@@ -1420,22 +1453,34 @@ VelocityNativeAdViewRequest.Builder(adViewSize: VelocityNativeAdViewSize)
 
 ```swift
 // Create SDK-rendered views (requires VelocityNativeAdViewRequest and a successful load)
-nativeAd.createAdView() -> VelocityNativeAdView?
-nativeAd.createAdSwiftUIView() -> AnyView?
+@MainActor nativeAd.createAdView() -> VelocityNativeAdView?
+@MainActor nativeAd.createAdSwiftUIView() -> AnyView?
 
 // Reconfigure an existing SDK-rendered view for cell recycling
-nativeAd.configureAdView(_ adView: VelocityNativeAdView)
+@MainActor nativeAd.configureAdView(_ adView: VelocityNativeAdView)
 
 // Collapse the Large ad card to compact height (no-op for Small/Medium)
-nativeAd.collapse()
+@MainActor nativeAd.collapse()
 
 // Manual rendering interaction tracking
-nativeAd.registerViewForInteraction(adView: UIView, clickableViews: [UIView])
-nativeAd.unregisterViewForInteraction()
+@MainActor nativeAd.registerViewForInteraction(adView: UIView, clickableViews: [UIView])
+@MainActor nativeAd.unregisterViewForInteraction()
 
 // Teardown (terminal — instance cannot be reloaded after this call)
-nativeAd.destroyAd()
+@MainActor nativeAd.destroyAd()
 ```
+
+> **Note:** `createAdView()`, `createAdSwiftUIView()`, `configureAdView(_:)`, `collapse()`, `registerViewForInteraction(adView:clickableViews:)`, `unregisterViewForInteraction()`, and `destroyAd()` are annotated `@MainActor`. Calling them from a delegate callback is safe (delegate callbacks are already delivered on the main thread). From a non-isolated context, wrap the call in `DispatchQueue.main.async { }` or `await MainActor.run { }`.
+
+#### `VelocityNativeAd` — Interaction Tracking
+
+```swift
+// Manual rendering: register impression and click tracking
+@MainActor nativeAd.registerViewForInteraction(adView: UIView, clickableViews: [UIView])
+@MainActor nativeAd.unregisterViewForInteraction()
+```
+
+> **Note:** `registerViewForInteraction(adView:clickableViews:)` and `unregisterViewForInteraction()` are annotated `@MainActor`. Calling them from a delegate callback is safe (delegate callbacks are already delivered on the main thread). From a non-isolated context, wrap the call in `DispatchQueue.main.async { }` or `await MainActor.run { }`.
 
 #### `VelocityNativeAdView.collapse()`
 
@@ -1446,6 +1491,8 @@ func collapse()
 Collapses this ad view to a compact preview state with animation, revealing a "See more" bar at the bottom. The user can tap "See more" to restore the full ad.
 
 Only valid for Large (`L`) ad views. Calling this on a Small or Medium view logs a warning and does nothing. If the view is already collapsed, the call is ignored.
+
+Must be called on the main thread. If called from a background thread, the collapse is dispatched asynchronously to the main thread.
 
 Equivalent to calling `VelocityNativeAd.collapse()` on the ad instance — use whichever reference is more convenient.
 
@@ -1469,9 +1516,7 @@ Accessed via `VelocityNativeAd.data` after a successful load with `VelocityNativ
 | `squareImageUrl` | `String?` | Square ad image URL (optional) |
 | `clickUrl` | `String` | URL opened on ad click |
 | `impressionUrl` | `String` | Impression tracking URL |
-| `adTemplateId` | `AdTemplateId?` | Layout template variant (optional) |
 | `preliminaryText` | `String?` | Short server-generated contextual text to display above the ad (optional — requires `includePreliminaryText(true)` on the request) |
-| `expandButton` | `String?` | Server-provided label for the "See more" expand button shown when a Large ad is collapsed. Nil means the SDK uses its default ("See more"). |
 
 #### `VelocityNativeAdViewSize`
 
@@ -1704,5 +1749,5 @@ protocol VelocityNativeAdDelegate: AnyObject {
 |--------|-------------|
 | `onAdLoaded` | Main thread. Ad data is loaded. Call `createAdView()` or `createAdSwiftUIView()` for SDK-rendered views, or read `nativeAd.data` for manual rendering. |
 | `onAdFailedToLoad` | Main thread. Ad failed to load. |
-| `onAdImpression` | Fires once when the ad is shown and the impression is recorded. Default implementation is a no-op. |
+| `onAdImpression` | Fires once when ≥ 50 % of the ad view is visible on screen. Default implementation is a no-op. |
 | `onAdClicked` | User tapped the ad (SDK handles opening the click URL). Default implementation is a no-op. |
