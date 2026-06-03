@@ -13,7 +13,7 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
    ```
    https://github.com/velocityiodev/velocityads-ios-sdk
    ```
-3. Choose the version rule (e.g. "Up to Next Major" from `0.6.0`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" from `0.7.0`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 ---
@@ -23,7 +23,7 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.6.0'
+pod 'VelocityAdsSDK', '0.7.0'
 ```
 
 Then run:
@@ -43,20 +43,19 @@ import VelocityAdsSDK
 let initRequest = VelocityAdsInitRequest.Builder("app_123").build()
 VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
 
-// 2a. Load a native ad (manual rendering)
-let adRequest = VelocityNativeAdRequest.Builder()
+// 2a. Load a native ad (manual rendering — adUnitId required)
+let adRequest = VelocityNativeAdRequest.Builder(adUnitId: "Ad unit id")
     .withPrompt("user query") // optional
     .withAIResponse("AI response text") // optional
     .withConversationHistory(conversationHistory) // optional
     .withAdditionalContext("optional extra context") // optional
-    .withAdUnitId(adUnitId) // optional
     .build()
 
 let nativeAd = VelocityNativeAd(adRequest)
 nativeAd.loadAd(delegate: myAdDelegate)
 
-// 2b. Load a native ad (SDK-rendered view — size required for template selection)
-let viewRequest = VelocityNativeAdViewRequest.Builder(adViewSize: .M)
+// 2b. Load a native ad (SDK-rendered view — adUnitId and size are required)
+let viewRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "Ad unit id", adViewSize: .M)
     .withPrompt("user query") // optional
     .withAIResponse("AI response text") // optional
     .build()

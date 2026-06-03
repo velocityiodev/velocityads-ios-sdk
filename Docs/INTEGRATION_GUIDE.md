@@ -1,7 +1,7 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.6.0
-**Last Updated:** May 2026  
+**Version:** 0.7.0
+**Last Updated:** June 2026  
 **Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
 
@@ -56,14 +56,14 @@ On iOS, access to IDFA is controlled by **App Tracking Transparency (ATT)**. You
 
 The Velocity Ads SDK can be installed via **Swift Package Manager (SPM)** or **CocoaPods**.
 
-> **Current version: `0.6.0`**  
+> **Current version: `0.7.0`**  
 
 ### Swift Package Manager (SPM)
 
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Set the version rule to **"Exact"** and enter **`0.6.0`**, then click **Add Package**.
+3. Set the version rule to **"Exact"** and enter **`0.7.0`**, then click **Add Package**.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 The package uses a binary target hosted on GitHub Releases. Each release provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
@@ -75,7 +75,7 @@ The package uses a binary target hosted on GitHub Releases. Each release provide
 1. Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.6.0'
+pod 'VelocityAdsSDK', '0.7.0'
 ```
 
 2. Run:
@@ -167,12 +167,11 @@ class MyViewController: UIViewController, VelocityNativeAdDelegate {
 
     func loadAd() {
         // 1. Build the request
-        let adRequest = VelocityNativeAdRequest.Builder()
+        let adRequest = VelocityNativeAdRequest.Builder(adUnitId: "ad_unit_123") // Ad unit identifier
             .withPrompt("What's the weather today?")              // Optional: Provide for context
             .withAIResponse("The weather is sunny with 72°F...")  // Optional: Provide for better targeting
             .withConversationHistory(nil)                         // Optional: Previous conversation
             .withAdditionalContext(nil)                           // Optional: Extra context
-            .withAdUnitId("ad_unit_123")                          // Optional: Ad unit identifier
             .build()
 
         // 2. Create the ad object and load
@@ -291,7 +290,7 @@ For better ad targeting in chat applications, you can provide conversation histo
 
 ```swift
 // First call — no conversation history
-let adRequest1 = VelocityNativeAdRequest.Builder()
+let adRequest1 = VelocityNativeAdRequest.Builder(adUnitId: "ad_unit_123") // Ad unit identifier
     .withPrompt("What's the weather today?")    // Optional: provide for context
     .withAIResponse("The weather is sunny...")  // Optional: provide AI response for better targeting
     .build()
@@ -304,7 +303,7 @@ let conversationHistory: [[String: Any]] = [
     ["role": "assistant", "content": "The weather is sunny..."]
 ]
 
-let adRequest2 = VelocityNativeAdRequest.Builder()
+let adRequest2 = VelocityNativeAdRequest.Builder(adUnitId: "ad_unit_123") // Ad unit identifier
     .withPrompt("What about tomorrow?")            // Optional: provide for context
     .withAIResponse("Tomorrow will be cloudy...")  // Optional: provide AI response for better targeting
     .withConversationHistory(conversationHistory)  // Previous conversation
@@ -321,7 +320,7 @@ When `.includePreliminaryText(true)` is set on the request, the server returns a
 
 ```swift
 // Request with preliminary text enabled
-let adRequest = VelocityNativeAdRequest.Builder()
+let adRequest = VelocityNativeAdRequest.Builder(adUnitId: "ad_unit_123")
     .withPrompt("Which running shoes are best for marathons?")
     .withAIResponse("For marathons, I recommend ...")
     .includePreliminaryText(true)
@@ -397,15 +396,14 @@ After a successful load, call `createAdView()` or `createAdSwiftUIView()` to get
 
 ### `VelocityNativeAdViewRequest`
 
-Build the request using the fluent builder. The only required argument is `adViewSize`; all other parameters are optional and inherited from `VelocityNativeAdRequest`.
+Build the request using the fluent builder. Both `adUnitId` and `adViewSize` are required; all other parameters are optional and inherited from `VelocityNativeAdRequest`.
 
 ```swift
-let adRequest = VelocityNativeAdViewRequest.Builder(adViewSize: .M)
+let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adViewSize: .M)
     .withPrompt("Best noise-cancelling headphones")                 // Optional: Provide for context
     .withAIResponse("The Sony WH-1000XM5 offers excellent ANC...")  // Optional: Provide for better targeting
     .withConversationHistory(conversationHistory)                   // Optional: Previous conversation
     .withAdditionalContext("electronics, audio")                    // Optional: Extra context
-    .withAdUnitId("chat_ad_unit")                                   // Optional: Ad unit identifier
     .withAdViewConfiguration(AdViewConfiguration(
         colorScheme: AdColorScheme.Builder()
             .light { $0.copy(ctaBackground: .systemBlue) }
@@ -419,7 +417,8 @@ nativeAd.loadAd(delegate: self)
 
 | Size | Constant | Height |
 |------|----------|--------|
-| Small | `.S` | 50 pt |
+| Extra Small | `.XS` | 64 pt |
+| Small | `.S` | 100 pt |
 | Medium | `.M` | 158 pt |
 | Large | `.L` | 280 pt |
 
@@ -509,7 +508,7 @@ class ChatViewController: UIViewController, UITableViewDataSource, VelocityNativ
     private var nativeAds: [UUID: VelocityNativeAd] = [:]
 
     private func loadAdForMessage(_ messageId: UUID, prompt: String, aiResponse: String?) {
-        let adRequest = VelocityNativeAdRequest.Builder()
+        let adRequest = VelocityNativeAdRequest.Builder(adUnitId: adUnitId)
             .withPrompt(prompt)
             .withAIResponse(aiResponse)
             .build()
@@ -582,7 +581,7 @@ class ManualAdViewModel: ObservableObject, VelocityNativeAdDelegate {
     @Published var nativeAd: VelocityNativeAd?
 
     func loadAd(prompt: String, aiResponse: String?) {
-        let adRequest = VelocityNativeAdRequest.Builder()
+        let adRequest = VelocityNativeAdRequest.Builder(adUnitId: adUnitId)
             .withPrompt(prompt)
             .withAIResponse(aiResponse)
             .build()
@@ -665,7 +664,7 @@ class FeedViewController: UIViewController, UITableViewDataSource, VelocityNativ
     private var nativeAds: [UUID: VelocityNativeAd] = [:]
 
     private func loadAd(for messageId: UUID, prompt: String) {
-        let adRequest = VelocityNativeAdViewRequest.Builder(adViewSize: .M)
+        let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: adUnitId, adViewSize: .M)
             .withPrompt(prompt)
             .build()
 
@@ -981,7 +980,11 @@ The collapse state is persisted on the `VelocityNativeAd` instance. When a `UITa
 
 ### Responding to Height Changes
 
-When the ad collapses or expands, `VelocityNativeAdView.onCollapseStateChanged` fires with `true` (collapsed) or `false` (expanded). Use this to animate your container's height constraint in sync with the card animation:
+When the ad collapses or expands, the SDK fires a callback so you can animate your container's height in sync with the card's internal animation. Two equivalent observation points are provided — choose the one that fits your rendering path.
+
+#### UIKit (and SwiftUI publishers who hold the `VelocityNativeAdView`)
+
+If you have a direct reference to a `VelocityNativeAdView` — i.e. you called `createAdView()` and kept the result, or you're inside a `UITableViewCell` that owns the view — assign `view.onCollapseStateChanged`:
 
 ```swift
 adView.onCollapseStateChanged = { [weak self] isCollapsed in
@@ -997,7 +1000,30 @@ adView.onCollapseStateChanged = { [weak self] isCollapsed in
 }
 ```
 
-This callback fires on the main thread immediately before the animation begins, so your constraint animation runs in parallel with the card's internal height animation.
+#### SwiftUI (when you called `createAdSwiftUIView()`)
+
+`createAdSwiftUIView()` returns an opaque `AnyView`, so you don't have a `VelocityNativeAdView` reference to attach a callback to. In that case, observe the same state change on the `VelocityNativeAd` instance you already hold:
+
+```swift
+@State private var adViewHeight: CGFloat = VelocityNativeAdViewSize.largeExpandedHeightPt
+
+// inside body:
+adSwiftUIView
+    .frame(height: adViewHeight)
+    .onAppear {
+        nativeAd.onCollapseStateChanged = { isCollapsed in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                adViewHeight = isCollapsed
+                    ? VelocityNativeAdViewSize.largeCollapsedHeightPt
+                    : VelocityNativeAdViewSize.largeExpandedHeightPt
+            }
+        }
+    }
+```
+
+> **Avoid retain cycles.** The closure is held strongly by `nativeAd` until replaced or `destroyAd()` is called. Do not capture `nativeAd` or any object that holds a strong reference back to `nativeAd` (such as a `VelocityNativeAdView` returned by `createAdView()`) inside the closure — doing so creates a cycle that leaks both objects. Capture only lightweight values such as SwiftUI `@State` bindings and height constants, as shown above.
+
+Both callbacks fire on the main thread immediately before the card's internal height animation begins, so your constraint or `@State` update animates in parallel with the card. They are equivalent in behavior — pick whichever matches your call site. Setting both is supported but unnecessary.
 
 ---
 
@@ -1024,7 +1050,7 @@ let config = AdViewConfiguration(
         .build()
 )
 
-let adRequest = VelocityNativeAdViewRequest.Builder(adViewSize: .M)
+let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adViewSize: .M)
     .withPrompt("...")
     .withAdViewConfiguration(config)
     .build()
@@ -1099,7 +1125,7 @@ let config = AdViewConfiguration(
     darkTheme: nil
 )
 
-let adRequest = VelocityNativeAdViewRequest.Builder(adViewSize: .M)
+let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adViewSize: .M)
     .withPrompt("Best running shoes")
     .withAdViewConfiguration(config)
     .build()
@@ -1200,12 +1226,11 @@ guard VelocityAds.isInitialized() else {
     return  // Skip this ad load, or retry later when initialized
 }
 
-let adRequest = VelocityNativeAdRequest.Builder()
+let adRequest = VelocityNativeAdRequest.Builder(adUnitId: adUnitId)
     .withPrompt(prompt)
     .withAIResponse(aiResponse)
     .withConversationHistory(conversationHistory)
     .withAdditionalContext(additionalContext)
-    .withAdUnitId(adUnitId)
     .build()
 let nativeAd = VelocityNativeAd(adRequest)
 nativeAd.loadAd(delegate: self)
@@ -1391,15 +1416,45 @@ VelocityAds.initSDK(request, delegate: MyInitDelegate())
 - `request` - Initialization request object containing required `appKey`
 - `delegate` - Initialization delegate (required)
 
+#### `setPresenterProvider(_:)` *(Advanced)*
+
+```swift
+VelocityAds.setPresenterProvider(_ provider: (() -> UIViewController?)?)
+```
+
+Supplies a `UIViewController` root that the SDK uses to present in-app StoreKit sheets (`SKStoreProductViewController`) when a user taps an ad.
+
+**Most apps do not need to call this method.** The SDK automatically discovers the correct presenter by scanning the active `UIWindowScene` and walking the `presentedViewController` chain. Call this only when auto-discovery produces the wrong result:
+
+- **Custom container view controllers** that are not `UITabBarController` or `UINavigationController` — the auto-discovery walk does not know how to descend into them, so it stops at the wrong level.
+- **Overlay windows** from debug tools, consent managers, or other SDKs that sit on top of your content and are incorrectly identified as the topmost presenter.
+- **Non-standard root VC patterns** such as dynamic root swapping at launch, or multi-scene edge cases where `activationState` alone is not a reliable signal.
+
+**Usage:**
+
+```swift
+// In your AppDelegate or SceneDelegate — call once before or after initSDK.
+VelocityAds.setPresenterProvider { [weak self] in
+    self?.window?.rootViewController
+}
+
+// To restore auto-discovery:
+VelocityAds.setPresenterProvider(nil)
+```
+
+**Parameters:**
+- `provider` - A closure returning the `UIViewController` the SDK should use as the starting point for presenter resolution. The SDK walks `presentedViewController` forward from this VC, so native modals pushed on top are handled automatically. Pass `nil` to clear any override and restore auto-discovery.
+
+> **Important:** The SDK retains the closure for the lifetime of the process (or until you call `setPresenterProvider(nil)`). Capture `self` **weakly** unless the providing object lives for the entire process lifetime (e.g. `UIApplicationDelegate`). For `UISceneDelegate` or any object that may be deallocated, always use `[weak self]`.
+
 #### `VelocityNativeAdRequest` / `VelocityNativeAd`
 
 ```swift
-let adRequest = VelocityNativeAdRequest.Builder()
+let adRequest = VelocityNativeAdRequest.Builder(adUnitId: String)
     .withPrompt(_ prompt: String?)
     .withAIResponse(_ aiResponse: String?)
     .withConversationHistory(_ history: [[String: Any]]?)
     .withAdditionalContext(_ context: String?)
-    .withAdUnitId(_ adUnitId: String?)
     .includePreliminaryText(_ include: Bool)
     .build() -> VelocityNativeAdRequest
 
@@ -1408,11 +1463,12 @@ nativeAd.loadAd(delegate: VelocityNativeAdDelegate)
 ```
 
 **`VelocityNativeAdRequest` builder parameters:**
+- `adUnitId` - Ad unit identifier (required)
 - `prompt` - User's prompt (optional, but recommended for context)
 - `aiResponse` - AI-generated response content (optional, but recommended for targeting)
 - `conversationHistory` - Conversation history for ad targeting — array of `["role": "user"/"assistant", "content": "..."]` dictionaries (optional)
 - `additionalContext` - Extra context string to improve ad relevance (optional)
-- `adUnitId` - Ad unit identifier (optional)
+- `adUnitId` - Ad unit identifier (required)
 - `includePreliminaryText` - When `true`, requests the server to generate a short contextual snippet ("preliminary text") that could be displayed above the ad creative. Defaults to `false`. (optional)
 
 **`VelocityNativeAd` properties (available after `onAdLoaded`):**
@@ -1427,7 +1483,8 @@ Ad creative data is accessed via `nativeAd.data` (type `NativeAd?`, non-nil afte
 - `nativeAd.data?.sponsoredLabel` (`String`) - Sponsorship label (e.g., "Sponsored")
 - `nativeAd.data?.badgeLabel` (`String`) - Badge text (e.g., "ad")
 - `nativeAd.data?.advertiserIconUrl` (`String`) - Advertiser logo/icon URL
-- `nativeAd.data?.largeImageUrl` (`String?`) - Landscape hero image URL (optional)
+- `nativeAd.data?.largeImageUrl` (`String?`) - Landscape hero image URL (optional). Resolved at the default 1920×640 size. For manual rendering at a specific size, call `nativeAd.data?.getLargeImageUrl(width:height:)` to obtain a URL sized to your image view's pixel dimensions.
+- `nativeAd.data?.getLargeImageUrl(width:height:)` (`String?`) - Returns the landscape hero image URL with dimension placeholders substituted for the supplied pixel values. Use this when manually rendering the image at a known size (e.g. after a `UIImageView` has been laid out) to request a Cloudinary-optimised resolution. When `width` or `height` is ≤ 0 the default 1920×640 dimensions are used.
 - `nativeAd.data?.squareImageUrl` (`String?`) - Square (1:1) image URL (optional)
 - `nativeAd.data?.clickUrl` (`String`) - Destination URL when ad is clicked
 - `nativeAd.data?.impressionUrl` (`String`) - URL to track ad impressions
@@ -1435,15 +1492,14 @@ Ad creative data is accessed via `nativeAd.data` (type `NativeAd?`, non-nil afte
 
 #### `VelocityNativeAdViewRequest`
 
-Extends `VelocityNativeAdRequest` with size and theming for SDK-rendered ad views. Required to use `createAdView()` and `createAdSwiftUIView()`. The size is sent to the server at load time so it can select the correct template.
+Extends `VelocityNativeAdRequest` with size and theming for SDK-rendered ad views. Required to use `createAdView()` and `createAdSwiftUIView()`. Both `adUnitId` and `adViewSize` are required; the size is sent to the server at load time so it can select the correct template.
 
 ```swift
-VelocityNativeAdViewRequest.Builder(adViewSize: VelocityNativeAdViewSize)
+VelocityNativeAdViewRequest.Builder(adUnitId: String, adViewSize: VelocityNativeAdViewSize)
     .withPrompt(_ prompt: String?)                           // Optional: Provide for context
     .withAIResponse(_ aiResponse: String?)                   // Optional: Provide for better targeting
     .withConversationHistory(_ history: [[String: Any]]?)    // Optional: Previous conversation
     .withAdditionalContext(_ context: String?)               // Optional: Extra context
-    .withAdUnitId(_ adUnitId: String?)                       // Optional: Ad unit identifier
     .includePreliminaryText(_ include: Bool)                 // Optional: Request preliminary text
     .withAdViewConfiguration(_ config: AdViewConfiguration)  // Optional: See Ad Theming
     .build() -> VelocityNativeAdViewRequest
@@ -1512,7 +1568,7 @@ Accessed via `VelocityNativeAd.data` after a successful load with `VelocityNativ
 | `sponsoredLabel` | `String` | Sponsorship label (e.g. "Sponsored") |
 | `badgeLabel` | `String` | Badge text (e.g. "ad") |
 | `advertiserIconUrl` | `String` | Advertiser logo/icon URL |
-| `largeImageUrl` | `String?` | Main (landscape) ad image URL (optional) |
+| `largeImageUrl` | `String?` | Main (landscape) ad image URL resolved at the default 1920×640 size (optional). Use `getLargeImageUrl(width:height:)` to request a size-optimised URL for your image view. |
 | `squareImageUrl` | `String?` | Square ad image URL (optional) |
 | `clickUrl` | `String` | URL opened on ad click |
 | `impressionUrl` | `String` | Impression tracking URL |
@@ -1691,6 +1747,7 @@ public enum VelocityAdsErrorCode {
     public static let adAlreadyLoaded: Int             // 2008
     public static let waterfallLoadFailed: Int         // 2009
     public static let adDestroyed: Int                 // 2010
+    public static let invalidAdUnitId: Int             // 2011
 }
 ```
 
@@ -1720,6 +1777,7 @@ Error code behavior:
   - `VelocityAdsErrorCode.adAlreadyLoaded` (`2008`) — `loadAd` called on an instance that has already loaded successfully. Create a new `VelocityNativeAd` for a new ad placement.
   - `VelocityAdsErrorCode.waterfallLoadFailed` (`2009`) — Waterfall load failed
   - `VelocityAdsErrorCode.adDestroyed` (`2010`) — `loadAd` called on a destroyed instance. Create a new `VelocityNativeAd` for a new ad placement.
+  - `VelocityAdsErrorCode.invalidAdUnitId` (`2011`) — `adUnitId` is empty or blank
 
 ### Delegates
 
