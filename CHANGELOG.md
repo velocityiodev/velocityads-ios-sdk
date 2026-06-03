@@ -1,9 +1,26 @@
 # Changelog
 
+## [0.7.0] - 2026-06-03
+
+**Features:**
+
+- **`VelocityNativeAdViewSize.XS`** – New extra-small ad size (64 pt height).
+- **`VelocityNativeAd.onCollapseStateChanged`** – New optional closure for SwiftUI publishers who use `createAdSwiftUIView()`. This closure fires on the main thread when a Large (`L`) ad transitions between expanded and collapsed states.
+- **`NativeAd.getLargeImageUrl(width:height:)`** – New method on `NativeAd` (accessible via `VelocityNativeAd.data`) that returns the landscape large image URL with dimension placeholders substituted for the supplied pixel values. Use this when manually rendering the large image at a known size to request an optimized resolution. When `width` or `height` is ≤ 0 the default 1920×640 dimensions are used. The existing `largeImageUrl` property continues to resolve at the default size.
+
+**Breaking Changes:**
+
+- **`adUnitId` is now a required parameter** — `VelocityNativeAdRequest.Builder` and `VelocityNativeAdViewRequest.Builder` both require `adUnitId` as their first constructor argument. Calls to `Builder()` (no arguments) or the now-removed `.withAdUnitId(_:)` chain method will not compile.
+  - `VelocityNativeAdRequest.Builder()` → `VelocityNativeAdRequest.Builder(adUnitId: "your-unit-id")`
+  - `VelocityNativeAdViewRequest.Builder(adViewSize: .M)` → `VelocityNativeAdViewRequest.Builder(adUnitId: "your-unit-id", adViewSize: .M)`
+  - Remove any `.withAdUnitId(...)` chain calls — the value is now passed directly to the constructor.
+- Updated the Small (`S`) ad view height from 50pt to 100pt.
+
 ## [0.6.0] - 2026-05-24
 
 **Features:**
 
+- **Expanded demand offering and improved performance** — NativeAdView ads now benefit from an expanded advertiser network and optimized ad delivery, resulting in higher fill rates and faster load times.
 - Updated the iOS SDK version numbering to align with the corresponding Android SDK version for cross-platform consistency.
 
 **Breaking Changes:**
