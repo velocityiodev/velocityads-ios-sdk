@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.9.0] - 2026-07-29
+
+- Internal improvements.
+
 ## [0.8.0] - 2026-06-28
 
 - Internal improvements.
