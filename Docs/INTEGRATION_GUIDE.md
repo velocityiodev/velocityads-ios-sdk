@@ -1,7 +1,7 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.8.0
-**Last Updated:** June 2026  
+**Version:** 0.9.0
+**Last Updated:** July 2026  
 **Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
 
@@ -56,14 +56,14 @@ On iOS, access to IDFA is controlled by **App Tracking Transparency (ATT)**. You
 
 The Velocity Ads SDK can be installed via **Swift Package Manager (SPM)** or **CocoaPods**.
 
-> **Current version: `0.8.0`**  
+> **Current version: `0.9.0`**  
 
 ### Swift Package Manager (SPM)
 
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Set the version rule to **"Exact"** and enter **`0.8.0`**, then click **Add Package**.
+3. Set the version rule to **"Exact"** and enter **`0.9.0`**, then click **Add Package**.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 The package uses a binary target hosted on GitHub Releases. Each release provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
@@ -75,7 +75,7 @@ The package uses a binary target hosted on GitHub Releases. Each release provide
 1. Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.8.0'
+pod 'VelocityAdsSDK', '0.9.0'
 ```
 
 2. Run:
