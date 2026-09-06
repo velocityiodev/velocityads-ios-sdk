@@ -1,7 +1,7 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.9.0
-**Last Updated:** July 2026  
+**Version:** 0.10.0
+**Last Updated:** September 2026  
 **Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
 
@@ -19,10 +19,13 @@
 8. [Recycling Container Integration](#recycling-container-integration)
 9. [Collapsing Large Ads](#collapsing-large-ads)
 10. [Ad Theming and Customization](#ad-theming-and-customization)
-11. [Regulations](#regulations)
-12. [Troubleshooting](#troubleshooting)
-13. [Best Practices](#best-practices)
-14. [API Reference](#api-reference)
+11. [Interstitial Ads](#interstitial-ads)
+12. [Rewarded Ads](#rewarded-ads)
+13. [Banner Ads](#banner-ads)
+14. [Regulations](#regulations)
+15. [Troubleshooting](#troubleshooting)
+16. [Best Practices](#best-practices)
+17. [API Reference](#api-reference)
 
 ---
 
@@ -56,14 +59,14 @@ On iOS, access to IDFA is controlled by **App Tracking Transparency (ATT)**. You
 
 The Velocity Ads SDK can be installed via **Swift Package Manager (SPM)** or **CocoaPods**.
 
-> **Current version: `0.9.0`**  
+> **Current version: `0.10.0`**  
 
 ### Swift Package Manager (SPM)
 
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Set the version rule to **"Exact"** and enter **`0.9.0`**, then click **Add Package**.
+3. Set the version rule to **"Exact"** and enter **`0.10.0`**, then click **Add Package**.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 The package uses a binary target hosted on GitHub Releases. Each release provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
@@ -75,7 +78,7 @@ The package uses a binary target hosted on GitHub Releases. Each release provide
 1. Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.9.0'
+pod 'VelocityAdsSDK', '0.10.0'
 ```
 
 2. Run:
@@ -157,7 +160,7 @@ For best performance, call `VelocityAds.setUserId(_:)` before `VelocityAds.initS
 The SDK provides a method for loading native ads:
 
 - **`VelocityNativeAdRequest`** — Immutable request object built via a fluent builder. Holds all targeting context.
-- **`VelocityNativeAd`** — The ad object. Create one from a request and call `loadAd(delegate:)` to trigger loading. Ad properties (`title`, `description`, etc.) are populated when `onAdLoaded` is called.
+- **`VelocityNativeAd`** — The ad object. Create one from a request and call `load(delegate:)` to trigger loading. Ad properties (`title`, `description`, etc.) are populated when `onAdLoaded` is called.
 
 > **Threading:** All `VelocityNativeAdDelegate` callbacks are always delivered on the **main thread** — you can update your UI directly without dispatching. The protocol is annotated `@MainActor` to express this guarantee to the Swift type system. If you build with **Swift 6** or with `SWIFT_STRICT_CONCURRENCY = complete`, your conforming type must be `@MainActor`-isolated (e.g. `UIViewController` already is); otherwise the compiler will emit an error. Under Swift 5 without strict concurrency, no annotation is required, but adding it is recommended.
 
@@ -176,7 +179,7 @@ class MyViewController: UIViewController, VelocityNativeAdDelegate {
 
         // 2. Create the ad object and load
         let nativeAd = VelocityNativeAd(adRequest)
-        nativeAd.loadAd(delegate: self)
+        nativeAd.load(delegate: self)
     }
 
     func onAdLoaded(nativeAd: VelocityNativeAd) {
@@ -255,7 +258,7 @@ Call `unregisterViewForInteraction()` when the ad view is no longer in use to st
 
 - **View controller teardown** — call it in `viewDidDisappear` or `deinit` if the ad is tied to a single screen.
 - **Ad replaced** — call it before calling `registerViewForInteraction` again with a different ad on the same view.
-- **Before `destroyAd()`** — unregister first if you are explicitly destroying the ad instance; `destroyAd()` itself is safe to call without it, but unregistering first is good practice.
+- **Before `destroy()`** — unregister first if you are explicitly destroying the ad instance; `destroy()` itself is safe to call without it, but unregistering first is good practice.
 
 ```swift
 // Example: tearing down an ad when a view controller disappears
@@ -265,7 +268,7 @@ override func viewDidDisappear(_ animated: Bool) {
 }
 ```
 
-> **Recycling containers:** In a `UITableView` or `UICollectionView`, call `unregisterViewForInteraction()` in `prepareForReuse` (or `didEndDisplayingCell`) so the outgoing ad is cleaned up before the cell is reused. See [Recycling Container Integration](#recycling-container-integration) for full patterns.
+> **Recycling containers:** In a `UITableView` or `UICollectionView`, call `unregisterViewForInteraction()` in **both** `prepareForReuse` and at the **start of the configure method** (identity-guarded: `if let previous = currentAd, previous !== nativeAd`). `prepareForReuse` cleans up on normal dequeue; the configure guard covers `reconfigureRows(at:)` (iOS 15+), which refreshes a visible cell in place without calling `prepareForReuse`. See [Recycling Container Integration](#recycling-container-integration) for full patterns.
 
 **For SwiftUI apps**, use the `.velocityAdTracking(_:)` modifier instead:
 
@@ -295,7 +298,7 @@ let adRequest1 = VelocityNativeAdRequest.Builder(adUnitId: "ad_unit_123") // Ad 
     .withAIResponse("The weather is sunny...")  // Optional: provide AI response for better targeting
     .build()
 let nativeAd1 = VelocityNativeAd(adRequest1)
-nativeAd1.loadAd(delegate: self)
+nativeAd1.load(delegate: self)
 
 // Subsequent calls — with conversation history
 let conversationHistory: [[String: Any]] = [
@@ -309,7 +312,7 @@ let adRequest2 = VelocityNativeAdRequest.Builder(adUnitId: "ad_unit_123") // Ad 
     .withConversationHistory(conversationHistory)  // Previous conversation
     .build()
 let nativeAd2 = VelocityNativeAd(adRequest2)
-nativeAd2.loadAd(delegate: self)
+nativeAd2.load(delegate: self)
 ```
 
 **Note:** The `withConversationHistory` parameter accepts an array of dictionaries (`[[String: Any]]?`). Each dictionary should have `"role"` (`"user"` or `"assistant"`) and `"content"` (message text). Update it with the full conversation history for best targeting.
@@ -327,7 +330,7 @@ let adRequest = VelocityNativeAdRequest.Builder(adUnitId: "ad_unit_123")
     .build()
 
 let nativeAd = VelocityNativeAd(adRequest)
-nativeAd.loadAd(delegate: self)
+nativeAd.load(delegate: self)
 ```
 
 After the ad loads, read and display the text above your ad UI:
@@ -373,15 +376,15 @@ For SDK-rendered ads (`VelocityNativeAdViewRequest`), place the preliminary text
 A `VelocityNativeAd` instance has a **one-way lifecycle**: create → load once → use → destroy.
 
 ```
-Created → loadAd() → Loading → success → Loaded → destroyAd() → Destroyed (terminal)
+Created → load() → Loading → success → Loaded → destroy() → Destroyed (terminal)
                                 ↓
                               failure (retry allowed)
 ```
 
-- **Load once:** After a successful load, calling `loadAd()` again on the same instance returns `VelocityAdsErrorCode.adAlreadyLoaded` (`2008`). Create a new `VelocityNativeAd` instance for each ad placement.
-- **Retry on failure:** If a load fails, you may call `loadAd()` again on the same instance.
-- **Terminal after destroy:** After `destroyAd()`, the instance is inert. `loadAd()` returns `adAlreadyLoaded`; `createAdView()` / `createAdSwiftUIView()` return `nil`; `configureAdView()` / `registerViewForInteraction()` are no-ops.
-- **`adRequest` remains readable** after destroy (it is a `let` constant), but **`data` is set to `nil`** by `destroyAd()`. The instance should not be used further.
+- **Load once:** After a successful load, calling `load()` again on the same instance returns `VelocityAdsErrorCode.adAlreadyLoaded` (`2008`). Create a new `VelocityNativeAd` instance for each ad placement.
+- **Retry on failure:** If a load fails, you may call `load()` again on the same instance.
+- **Terminal after destroy:** After `destroy()`, the instance is inert. `load()` returns `adAlreadyLoaded`; `createAdView()` / `createAdSwiftUIView()` return `nil`; `configureAdView()` / `registerViewForInteraction()` are no-ops.
+- **`adRequest` remains readable** after destroy (it is a `let` constant), but **`data` is set to `nil`** by `destroy()`. The instance should not be used further.
 
 ---
 
@@ -412,7 +415,7 @@ let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adV
     .build()
 
 let nativeAd = VelocityNativeAd(adRequest)
-nativeAd.loadAd(delegate: self)
+nativeAd.load(delegate: self)
 ```
 
 | Size | Constant | Height |
@@ -426,9 +429,9 @@ nativeAd.loadAd(delegate: self)
 
 ### Creating Ad Views
 
-After a successful `loadAd(delegate:)` call, create SDK-rendered views on demand. This separates the expensive network load from the cheap view creation — the key to efficient cell recycling.
+After a successful `load(delegate:)` call, create SDK-rendered views on demand. This separates the expensive network load from the cheap view creation — the key to efficient cell recycling.
 
-Views return `nil` if the request was a plain `VelocityNativeAdRequest`, if `loadAd` has not yet succeeded, or if the instance has been destroyed via `destroyAd()`.
+Views return `nil` if the request was a plain `VelocityNativeAdRequest`, if `load` has not yet succeeded, or if the instance has been destroyed via `destroy()`.
 
 #### `createAdView() -> VelocityNativeAdView?`
 
@@ -460,7 +463,7 @@ func onAdLoaded(nativeAd: VelocityNativeAd) {
 **Return value:** Both `createAdView()` and `createAdSwiftUIView()` return `nil` if:
 - The ad data has not been loaded yet (before `onAdLoaded`).
 - The `adRequest` was a plain `VelocityNativeAdRequest` instead of `VelocityNativeAdViewRequest`.
-- The instance has been destroyed via `destroyAd()`.
+- The instance has been destroyed via `destroy()`.
 
 > **Note:** Publishers using the manual rendering path (`VelocityNativeAdRequest`) do not call `createAdView` or `createAdSwiftUIView`. Use `registerViewForInteraction(adView:clickableViews:)` instead to wire impression and click tracking.
 
@@ -496,7 +499,7 @@ Internally, `configureAdView` updates all displayed fields, resets the impressio
 
 ### Pattern 1: Manual Rendering (UIKit Recycling Container)
 
-Use `VelocityNativeAdRequest` to load ad data. The publisher builds custom UI from `nativeAd.data`. Pre-load ads before binding to cells. Call `registerViewForInteraction` in `cellForRowAt` and `unregisterViewForInteraction` in `prepareForReuse`.
+Use `VelocityNativeAdRequest` to load ad data. The publisher builds custom UI from `nativeAd.data`. Pre-load ads before binding to cells. Call `unregisterViewForInteraction` in **both** `prepareForReuse` and at the start of the configure method (identity-guarded), then call `registerViewForInteraction` for the incoming ad. `prepareForReuse` handles normal cell dequeue; the identity guard in configure covers `reconfigureRows(at:)`, which refreshes a visible cell in place without calling `prepareForReuse`.
 
 ```swift
 import UIKit
@@ -515,7 +518,7 @@ class ChatViewController: UIViewController, UITableViewDataSource, VelocityNativ
 
         let nativeAd = VelocityNativeAd(adRequest)
         nativeAds[messageId] = nativeAd
-        nativeAd.loadAd(delegate: self)
+        nativeAd.load(delegate: self)
     }
 
     func onAdLoaded(nativeAd: VelocityNativeAd) {
@@ -551,7 +554,12 @@ class ManualAdCell: UITableViewCell {
     private var currentAd: VelocityNativeAd?
 
     func configure(with nativeAd: VelocityNativeAd) {
-        currentAd?.unregisterViewForInteraction()
+        // Unregister the previous ad if it differs from the incoming one. This
+        // covers reconfigureRows(at:), which refreshes a visible cell without
+        // calling prepareForReuse.
+        if let previous = currentAd, previous !== nativeAd {
+            previous.unregisterViewForInteraction()
+        }
         currentAd = nativeAd
         titleLabel.text = nativeAd.data?.title
         ctaButton.setTitle(nativeAd.data?.callToAction, for: .normal)
@@ -560,8 +568,12 @@ class ManualAdCell: UITableViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        // Unregister and clear on normal cell dequeue so the cell is clean when
+        // it returns to the pool. configure() handles reconfigureRows independently.
         currentAd?.unregisterViewForInteraction()
         currentAd = nil
+        titleLabel.text = nil
+        ctaButton.setTitle(nil, for: .normal)
     }
 }
 ```
@@ -587,7 +599,7 @@ class ManualAdViewModel: ObservableObject, VelocityNativeAdDelegate {
             .build()
 
         let ad = VelocityNativeAd(adRequest)
-        ad.loadAd(delegate: self)
+        ad.load(delegate: self)
     }
 
     func onAdLoaded(nativeAd: VelocityNativeAd) {
@@ -670,7 +682,7 @@ class FeedViewController: UIViewController, UITableViewDataSource, VelocityNativ
 
         let nativeAd = VelocityNativeAd(adRequest)
         nativeAds[messageId] = nativeAd
-        nativeAd.loadAd(delegate: self)
+        nativeAd.load(delegate: self)
     }
 
     func onAdLoaded(nativeAd: VelocityNativeAd) {
@@ -910,9 +922,9 @@ LazyVStack {
 | Lifecycle Event | Pattern 1: Manual | Pattern 3: SDK UIView | Pattern 5: SDK SwiftUI |
 |---|---|---|---|
 | `cellForRowAt` — first use | Populate UI from `nativeAd.data`, then `registerViewForInteraction(adView:clickableViews:)` | `createAdView()` → add to cell | `createAdSwiftUIView()` → assign `UIHostingConfiguration` (iOS 16+) or create `UIHostingController` → add to cell (iOS 13-15) |
-| `cellForRowAt` — reused cell | Populate UI from `nativeAd.data`, then `registerViewForInteraction(adView:clickableViews:)` | `configureAdView(existingAdView)` | `createAdSwiftUIView()` → reassign `contentConfiguration` (iOS 16+) or replace `hostingController.rootView` (iOS 13-15) |
-| `prepareForReuse` | `unregisterViewForInteraction()` | Nothing required | Nothing required |
-| `didEndDisplaying` | `unregisterViewForInteraction()` (alternative to `prepareForReuse`) | Nothing required | Nothing required |
+| `cellForRowAt` — reused cell | Identity-guarded `unregisterViewForInteraction()` at start of configure, populate UI, then `registerViewForInteraction(adView:clickableViews:)` | `configureAdView(existingAdView)` | `createAdSwiftUIView()` → reassign `contentConfiguration` (iOS 16+) or replace `hostingController.rootView` (iOS 13-15) |
+| `prepareForReuse` | `unregisterViewForInteraction()` + clear visual content | Nothing required | Nothing required |
+| `didEndDisplaying` | Nothing required | Nothing required | Nothing required |
 
 #### SwiftUI Lazy Containers (`LazyVStack` / `List` / etc.)
 
@@ -922,8 +934,8 @@ LazyVStack {
 | View disappears | `.velocityAdTracking()` auto-unregisters via `willMove(toWindow: nil)` | Automatic via `didMoveToWindow` | Automatic via `didMoveToWindow` |
 | View identity changes | SwiftUI recreates the view; modifier wires the new ad | `onAppear` fires for the new identity; `guard == nil` creates a new view | `onAppear` fires for the new identity; `guard == nil` creates a new view |
 
-> **When to call `prepareForReuse` vs `unregisterViewForInteraction`:**
-> `prepareForReuse` is called by UIKit just before a cell is dequeued and handed to the next `cellForRowAt` call. For **manual rendering** (Pattern 1), call `unregisterViewForInteraction()` there to stop the visibility timer and remove gesture recognizers from the old ad. For **SDK-rendered views** (Patterns 3 and 5), teardown is handled internally — no publisher action needed in `prepareForReuse`.
+> **`prepareForReuse` and configure both call `unregisterViewForInteraction` (defense-in-depth):**
+> These two call sites cover different code paths. `prepareForReuse` fires on normal cell dequeue and keeps the pool clean; the identity-guarded call at the start of configure covers `reconfigureRows(at:)` (iOS 15+), which refreshes a visible cell in place without calling `prepareForReuse`. Both are needed. Do **not** remove either one. For **SDK-rendered views** (Patterns 3 and 5), teardown is handled internally — no publisher action needed in either method.
 
 ---
 
@@ -938,7 +950,7 @@ This is useful when you want to reduce the visual footprint of an ad after it ha
 Call `collapse()` on the `VelocityNativeAd` instance after the ad view has been created and attached:
 
 ```swift
-nativeAd.loadAd(delegate: self)
+nativeAd.load(delegate: self)
 
 // In VelocityNativeAdDelegate.onAdLoaded:
 func onAdLoaded(nativeAd: VelocityNativeAd) {
@@ -1021,7 +1033,7 @@ adSwiftUIView
     }
 ```
 
-> **Avoid retain cycles.** The closure is held strongly by `nativeAd` until replaced or `destroyAd()` is called. Do not capture `nativeAd` or any object that holds a strong reference back to `nativeAd` (such as a `VelocityNativeAdView` returned by `createAdView()`) inside the closure — doing so creates a cycle that leaks both objects. Capture only lightweight values such as SwiftUI `@State` bindings and height constants, as shown above.
+> **Avoid retain cycles.** The closure is held strongly by `nativeAd` until replaced or `destroy()` is called. Do not capture `nativeAd` or any object that holds a strong reference back to `nativeAd` (such as a `VelocityNativeAdView` returned by `createAdView()`) inside the closure — doing so creates a cycle that leaks both objects. Capture only lightweight values such as SwiftUI `@State` bindings and height constants, as shown above.
 
 Both callbacks fire on the main thread immediately before the card's internal height animation begins, so your constraint or `@State` update animates in parallel with the card. They are equivalent in behavior — pick whichever matches your call site. Setting both is supported but unnecessary.
 
@@ -1056,7 +1068,7 @@ let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adV
     .build()
 
 let nativeAd = VelocityNativeAd(adRequest)
-nativeAd.loadAd(delegate: self)
+nativeAd.load(delegate: self)
 ```
 
 #### Available Color Tokens
@@ -1131,8 +1143,406 @@ let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adV
     .build()
 
 let nativeAd = VelocityNativeAd(adRequest)
-nativeAd.loadAd(delegate: self)
+nativeAd.load(delegate: self)
 ```
+
+---
+
+## Interstitial Ads
+
+Interstitial ads are fullscreen video or MRAID creatives shown at natural transition points in your app flow (e.g. between game levels, after completing a task). The SDK handles the fullscreen presentation surface, player chrome, skip/close controls, and ad tracking automatically.
+
+### Lifecycle
+
+```
+Created → load(delegate:) → Loading → onAdLoaded → Ready
+                                 ↓
+                         onAdFailedToLoad (retry allowed)
+
+Ready → show() → onAdShown → Presenting → onAdDismissed → Spent (terminal)
+          ↓
+    onAdFailedToShow (ad stays Ready — retry allowed unless expired or destroyed)
+```
+
+An interstitial instance is **single-use**: after the user dismisses the ad the instance transitions to *spent* and can neither be reloaded nor shown again. Create a new `VelocityInterstitialAd` for every impression.
+
+### Basic Integration
+
+```swift
+@MainActor
+class MyViewController: UIViewController, VelocityInterstitialAdDelegate {
+
+    private var interstitialAd: VelocityInterstitialAd?
+
+    // MARK: - Load
+
+    func loadInterstitial() {
+        let request = VelocityInterstitialAdRequest.Builder(adUnitId: "your-ad-unit-id")
+            .withAdditionalContext(nil) // Optional: extra context for targeting
+            .build()
+        let ad = VelocityInterstitialAd(request)
+        interstitialAd = ad
+        ad.load(delegate: self)
+    }
+
+    // MARK: - Show
+
+    func showInterstitialIfReady() {
+        guard let ad = interstitialAd, ad.isReady else { return }
+        ad.show()
+    }
+
+    // MARK: - VelocityInterstitialAdDelegate
+
+    func onAdLoaded(interstitialAd: VelocityInterstitialAd) {
+        // Ad is ready — show immediately or defer to a natural break point.
+        interstitialAd.show()
+    }
+
+    func onAdFailedToLoad(interstitialAd: VelocityInterstitialAd, error: VelocityAdsError) {
+        print("Interstitial failed to load: \(error)")
+        self.interstitialAd = nil
+    }
+
+    func onAdShown(interstitialAd: VelocityInterstitialAd) {
+        // Fullscreen surface is visible. Pause game audio, timers, etc.
+    }
+
+    func onAdImpression(interstitialAd: VelocityInterstitialAd) {
+        // Ad impression recorded — align your own impression tracking here if needed.
+    }
+
+    func onAdFailedToShow(interstitialAd: VelocityInterstitialAd, error: VelocityAdsError) {
+        // Show was rejected. The ad is still ready unless it expired or was destroyed.
+        print("Interstitial failed to show: \(error)")
+    }
+
+    func onAdClicked(interstitialAd: VelocityInterstitialAd) {
+        // User tapped the ad. The SDK opens the click-through URL automatically.
+    }
+
+    func onAdDismissed(interstitialAd: VelocityInterstitialAd) {
+        // Fullscreen surface dismissed. Resume game, timers, etc.
+        // The instance is now spent — release it and pre-load the next one.
+        interstitialAd.destroy()
+        self.interstitialAd = nil
+        loadInterstitial()   // Pre-load for the next break point
+    }
+}
+```
+
+> **Threading:** `show()` is annotated `@MainActor` and must be called on the main thread. All `VelocityInterstitialAdDelegate` callbacks are delivered on the main thread. The protocol is annotated `@MainActor` — conform your delegate with `@MainActor` to update UI directly from callbacks.
+
+### Pre-loading
+
+Load the interstitial ahead of time so it is ready at the natural break point:
+
+```swift
+// Load on app launch or after the previous ad is dismissed
+func applicationDidFinishLaunching() {
+    loadInterstitial()
+}
+
+// At the break point, show only if already ready
+func levelCompleted() {
+    if let ad = interstitialAd, ad.isReady {
+        ad.show()
+    } else {
+        // Ad not ready — skip this break point or show after load
+    }
+}
+```
+
+### Cleanup
+
+Call `destroy()` whenever the hosting view controller or object is deallocated, to cancel any in-flight load and silence callbacks:
+
+```swift
+deinit {
+    interstitialAd?.destroy()
+}
+```
+
+`destroy()` is idempotent and safe to call on a spent instance.
+
+### Concurrent Shows
+
+At most one fullscreen interstitial can be on screen process-wide. If `show()` is called while another ad is presenting, it is immediately rejected via `onAdFailedToShow` with error code `2007` (`internalError`). No user-visible action is taken and the instance remains ready.
+
+### Presenter Resolution
+
+The SDK automatically resolves the topmost `UIViewController` across the active scene's window hierarchy to present the fullscreen surface. If your app uses a non-standard container hierarchy or overlay windows that confuse auto-resolution, supply a custom presenter:
+
+```swift
+// In AppDelegate or SceneDelegate — call once, before or after initSDK
+VelocityAds.setPresenterProvider { [weak self] in
+    self?.window?.rootViewController
+}
+```
+
+See [`setPresenterProvider(_:)`](#setpresenterprovider-advanced) in the API Reference for full details.
+
+---
+
+## Rewarded Ads
+
+Rewarded ads are fullscreen ads — typically video — where the user engages with the ad in exchange for an in-app reward (e.g. currency, lives, or premium content). The SDK handles the fullscreen presentation surface, player chrome, skip/close controls, and ad tracking automatically. When the user completes the ad, `onUserRewarded` fires before `onAdDismissed` — grant the reward when you receive that callback.
+
+### 1. Create an ad request
+
+```swift
+let adRequest = VelocityRewardedAdRequest.Builder(adUnitId: "your-ad-unit-id")
+    .withAdditionalContext(nil) // Optional: extra context for targeting
+    .build()
+```
+
+### 2. Create and load the ad
+
+```swift
+let rewardedAd = VelocityRewardedAd(adRequest)
+rewardedAd.load(delegate: self)
+```
+
+### 3. Implement VelocityRewardedAdDelegate
+
+```swift
+extension YourViewController: VelocityRewardedAdDelegate {
+
+    // Required
+    func onAdLoaded(rewardedAd: VelocityRewardedAd) {
+        // Ad is ready — show when appropriate
+        rewardedAd.show()
+    }
+
+    func onAdFailedToLoad(rewardedAd: VelocityRewardedAd, error: VelocityAdsError) {
+        print("Rewarded ad failed to load: \(error)")
+    }
+
+    func onUserRewarded(rewardedAd: VelocityRewardedAd) {
+        // Grant reward to user
+    }
+
+    // Optional
+    func onAdShown(rewardedAd: VelocityRewardedAd) { }
+    func onAdImpression(rewardedAd: VelocityRewardedAd) { }
+    func onAdDismissed(rewardedAd: VelocityRewardedAd) {
+        // Create a new VelocityRewardedAd for the next ad
+        rewardedAd.destroy()
+    }
+}
+```
+
+### Callback reference
+
+| Callback | Required | Description |
+|---|---|---|
+| `onAdLoaded(rewardedAd:)` | Yes | Ad loaded and ready to show |
+| `onAdFailedToLoad(rewardedAd:error:)` | Yes | Ad failed to load |
+| `onUserRewarded(rewardedAd:)` | Yes | User completed the video; grant the reward |
+| `onAdShown(rewardedAd:)` | No | Fullscreen surface became visible |
+| `onAdImpression(rewardedAd:)` | No | Ad impression recorded |
+| `onAdFailedToShow(rewardedAd:error:)` | No | `show()` was rejected or failed |
+| `onAdClicked(rewardedAd:)` | No | User opened the click-through |
+| `onAdDismissed(rewardedAd:)` | No | Fullscreen surface dismissed (terminal callback) |
+
+---
+
+## Banner Ads
+
+Banner ads are compact HTML creatives rendered inline in your own layout — anchored at the bottom of the screen, embedded in a feed, or placed anywhere else a `UIView` fits. Unlike interstitial and rewarded ads there is no fullscreen presentation and no `show()` step: the SDK renders the creative directly inside a `VelocityBannerAdView` that you create, size, and place. The banner is visible as soon as the view is in your view hierarchy and stays rendered until you call `destroy()`. The SDK does not auto-refresh banners — load a new instance when you want a new creative.
+
+### Lifecycle
+
+```
+Created → load(bannerView:delegate:) → Loading → onAdLoaded → Rendering (continuous)
+                                          ↓
+                                  onAdFailedToLoad
+
+Any state → destroy() → Destroyed (terminal)
+```
+
+A banner instance is **single-use**: exactly one `load(bannerView:delegate:)` call per instance, and exactly one of `onAdLoaded` / `onAdFailedToLoad` fires per call. A second `load` on the same instance fails with `adAlreadyLoaded` (2008); calling `load` while a load is in flight fails with `loadAlreadyInProgress` (2003); calling `load` after `destroy()` fails with `adDestroyed` (2010). Create a new `VelocityBannerAd` for every creative you want to display.
+
+### Banner Sizes
+
+Every request carries a `VelocityBannerAdSize` that determines the creative dimensions requested from the server:
+
+| Size | Dimensions | Use |
+|------|-----------|-----|
+| `.banner` | 320 × 50 pt | Standard mobile banner |
+| `.mrec` | 300 × 250 pt | Medium rectangle (MREC), typical in feeds |
+| `.leaderboard` | 728 × 90 pt | Wide banner, typical on iPad |
+| `.adaptiveBanner(width:)` | your width × computed height | Full-width banner whose height is anchored to the 320:50 aspect ratio, clamped to [32, 90] pt |
+
+For adaptive banners, read the computed size back from the value to size your container:
+
+```swift
+let adaptive = VelocityBannerAdSize.adaptiveBanner(width: view.bounds.width)
+// adaptive.width and adaptive.height are the resolved slot dimensions in points
+```
+
+### Basic Integration (UIKit)
+
+```swift
+@MainActor
+class MyViewController: UIViewController, VelocityBannerAdDelegate {
+
+    private var bannerAd: VelocityBannerAd?
+    private let bannerView = VelocityBannerAdView()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        // Place and size the banner view. intrinsicContentSize is .zero until the
+        // ad loads, then reports the bound ad size — so with only position
+        // constraints the view expands automatically on load.
+        bannerView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bannerView)
+        NSLayoutConstraint.activate([
+            bannerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            bannerView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+        ])
+
+        loadBanner()
+    }
+
+    private func loadBanner() {
+        let request = VelocityBannerAdRequest.Builder(adUnitId: "your-ad-unit-id", adSize: .banner)
+            .build()
+        let ad = VelocityBannerAd(request)
+        bannerAd = ad
+        ad.load(bannerView: bannerView, delegate: self)
+    }
+
+    // MARK: - VelocityBannerAdDelegate
+
+    func onAdLoaded(ad: VelocityBannerAd) {
+        // The creative is rendering inside bannerView.
+    }
+
+    func onAdFailedToLoad(ad: VelocityBannerAd, error: VelocityAdsError) {
+        print("Banner failed to load: \(error)")
+        bannerAd = nil
+    }
+
+    func onAdImpression(ad: VelocityBannerAd) {
+        // Viewability impression recorded — see "Impression Semantics" below.
+    }
+
+    func onAdFailedToShow(ad: VelocityBannerAd, error: VelocityAdsError) {
+        // Rendering failed after a successful load — release and load a new instance.
+        ad.destroy()
+        bannerAd = nil
+    }
+
+    func onAdClicked(ad: VelocityBannerAd) {
+        // User tapped the banner. The SDK opens the click-through URL automatically.
+    }
+
+    deinit {
+        bannerAd?.destroy()
+    }
+}
+```
+
+The banner view can be added to your hierarchy before or after calling `load` — the SDK attaches its player when the ad loads and the view acquires a window.
+
+> **Threading:** `load(bannerView:delegate:)` is annotated `@MainActor` and must be called on the main thread. All `VelocityBannerAdDelegate` callbacks are delivered on the main thread; the protocol is `@MainActor`-annotated. `destroy()` is safe from any thread. The delegate is held weakly — retain it for as long as callbacks are expected.
+
+### SwiftUI Integration
+
+`VelocityBannerAdView` is a `UIView`, so SwiftUI hosts it through a small `UIViewRepresentable` wrapper. Forward the size proposed by the enclosing `.frame()` modifier to `handleContainerSizeChange(_:)` so the SDK can keep the creative's viewport in sync when the frame changes (e.g. on device rotation):
+
+```swift
+struct BannerAdRepresentable: UIViewRepresentable {
+    let bannerView: VelocityBannerAdView
+    let proposedSize: CGSize
+
+    func makeUIView(context: Context) -> VelocityBannerAdView { bannerView }
+
+    func updateUIView(_ uiView: VelocityBannerAdView, context: Context) {
+        uiView.handleContainerSizeChange(proposedSize)
+    }
+}
+```
+
+Own the ad object, the banner view, and the delegate conformance in an `ObservableObject` so they outlive body re-evaluations:
+
+```swift
+@MainActor
+final class BannerViewModel: ObservableObject, VelocityBannerAdDelegate {
+
+    let bannerView = VelocityBannerAdView()
+    let adSize = VelocityBannerAdSize.banner
+    @Published private(set) var isLoaded = false
+
+    private var bannerAd: VelocityBannerAd?
+
+    func load() {
+        let request = VelocityBannerAdRequest.Builder(adUnitId: "your-ad-unit-id", adSize: adSize)
+            .build()
+        let ad = VelocityBannerAd(request)
+        bannerAd = ad
+        ad.load(bannerView: bannerView, delegate: self)
+    }
+
+    func onAdLoaded(ad: VelocityBannerAd) {
+        isLoaded = true
+    }
+
+    func onAdFailedToLoad(ad: VelocityBannerAd, error: VelocityAdsError) {
+        print("Banner failed to load: \(error)")
+    }
+
+    deinit {
+        bannerAd?.destroy()
+    }
+}
+
+struct BannerSection: View {
+    @StateObject private var viewModel = BannerViewModel()
+
+    var body: some View {
+        Group {
+            if viewModel.isLoaded {
+                BannerAdRepresentable(
+                    bannerView: viewModel.bannerView,
+                    proposedSize: CGSize(width: viewModel.adSize.width, height: viewModel.adSize.height)
+                )
+                .frame(width: viewModel.adSize.width, height: viewModel.adSize.height)
+            }
+        }
+        .onAppear { viewModel.load() }
+    }
+}
+```
+
+SwiftUI calls `updateUIView` whenever the proposed size changes, so rotation is handled automatically by this recipe. See `BannerDemoView.swift` in the SampleApp for a complete working example, including adaptive sizing against the container width.
+
+### Impression Semantics
+
+`onAdImpression` fires when the banner records an **MRC-compliant viewability impression**: at least 50 % of the banner view's area visible on screen for at least 1 *contiguous* second. Dwell time resets whenever visibility is interrupted — the view is scrolled off, occluded, hidden, or the app is backgrounded — so brief flashes of visibility never count. The impression fires **at most once per instance**.
+
+`onAdImpression` is where the impression is billed; align your own impression analytics with this callback rather than with `onAdLoaded`.
+
+### Rotation and Resizing
+
+- **UIKit:** nothing to do — the banner view observes its own `layoutSubviews` and forwards size changes to the player automatically.
+- **SwiftUI:** call `handleContainerSizeChange(_:)` from `updateUIView(_:context:)` as shown above. SwiftUI does not trigger a UIKit layout pass for every frame-modifier change, so the explicit forward keeps the creative's viewport in sync.
+
+The rendered creative always fills the banner view's current bounds; the requested `VelocityBannerAdSize` determines which creative the server selects, not a hard runtime constraint on the view's size.
+
+### Cleanup
+
+Call `destroy()` when you are done with the banner — when its hosting screen is dismissed, or before replacing it with a new instance:
+
+```swift
+deinit {
+    bannerAd?.destroy()
+}
+```
+
+`destroy()` cancels any in-flight load, tears down the player, removes the rendered content from the banner view, and silences all further callbacks. It is idempotent and safe to call from any thread. The `VelocityBannerAdView` itself remains yours — remove it from your hierarchy or reuse it with a **new** `VelocityBannerAd` instance.
 
 ---
 
@@ -1192,11 +1602,11 @@ VelocityAds.setConsent(false)
 
 #### 1. "SDK not initialized" Error
 
-**Problem:** Calling `loadNativeAd` before `initSDK`, or loading ads before initialization has completed.
+**Problem:** Loading an ad (native, interstitial, rewarded, or banner) before `initSDK`, or before initialization has completed.
 
 
 **Solution 1 — Use VelocityAdsInitDelegate:** 
-Initialize at startup and only load ads after initialization succeeds. This avoids calling `loadNativeAd` before the SDK is ready.
+Initialize at startup and only load ads after initialization succeeds. This avoids loading before the SDK is ready.
 
 ```swift
 let initRequest = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY").build()
@@ -1233,7 +1643,7 @@ let adRequest = VelocityNativeAdRequest.Builder(adUnitId: adUnitId)
     .withAdditionalContext(additionalContext)
     .build()
 let nativeAd = VelocityNativeAd(adRequest)
-nativeAd.loadAd(delegate: self)
+nativeAd.load(delegate: self)
 ```
 
 #### Init Failure Handling (Connectivity + Retry)
@@ -1276,7 +1686,6 @@ final class SDKInitCoordinator: VelocityAdsInitDelegate {
     }
 
     func onInitSuccess() {
-        retryAttempt = 0
         print("VelocityAds init success")
     }
 
@@ -1326,14 +1735,29 @@ Best practices:
 
 **Solution:** Retain the callback (e.g. in a dedicated object or via the view controller) until `onAdLoaded` or `onAdFailedToLoad` is called. Avoid using `self` from a short-lived object (e.g. table view cell) as the callback without retaining it.
 
-#### 3. No Ads Returned
+Call `destroy()` on every ad instance — native, interstitial, rewarded, or banner — when the hosting screen is dismissed, typically in `deinit`.
+
+#### 3. Ad Fails to Show (Fullscreen)
+
+**Problem:** `onAdFailedToShow` fires when you call `show()` on an interstitial or rewarded ad.
+
+**Common causes:**
+
+- **The ad wasn't ready.** `show()` was called before `onAdLoaded`, or after the loaded ad expired, was already shown, or was destroyed. Always gate `show()` behind `isReady`.
+- **Another fullscreen ad is already on screen.** At most one fullscreen ad can present process-wide. Don't call `show()` while another interstitial or rewarded ad is still visible — wait for its `onAdDismissed`.
+- **No presenter available.** The SDK couldn't find a view controller to present from — e.g. the app is backgrounded, mid-transition, or uses a non-standard window setup. Only call `show()` while the UI is foregrounded and idle, or provide `VelocityAds.setPresenterProvider` for unusual window hierarchies.
+- **The creative failed to render.** A rare playback/render error inside the ad itself.
+
+**Recovery:** The `error` tells you which case you hit. For the first three, the ad usually remains ready and `show()` can be retried once the blocking condition clears. For a render failure the instance is spent — destroy it and load a new one. When in doubt, destroying and reloading is always safe.
+
+#### 4. No Ads Returned
 
 **Possible causes:**
 - No ads available for the given context
 - Network issues
 - Ad unit not configured
 
-**Solution:** Handle `onAdFailedToLoad` gracefully (e.g. hide ad space or show fallback). The SDK continues to function even when no ads are available.
+**Solution:** Handle `onAdFailedToLoad` gracefully (e.g. hide ad space or show fallback). The SDK continues to function even when no ads are available. This applies to every ad format.
 
 ---
 
@@ -1351,21 +1775,36 @@ Best practices:
 
 ### 2. Ad Loading
 
+Applies to every ad format — native, interstitial, rewarded, and banner.
+
 ✅ **DO:**
-- Provide meaningful context (prompt, ai response, conversation history)
 - Handle errors gracefully (e.g. hide ad view or show fallback)
+- Wait for `onAdLoaded` before showing (fullscreen) or displaying (native / banner) the ad
+- Pre-load fullscreen ads ahead of the moment you want to show them, and guard `show()` with `isReady`
+- Provide meaningful context for native ads (prompt, ai response, conversation history)
 - Track impressions and clicks for analytics
-- Use dimensions in **points** that match your ad container
 
 ❌ **DON'T:**
 - Use empty or placeholder context when you have real content
 - Block the main thread
 - Ignore error callbacks
-- Use incorrect or zero dimensions
+- Call `load()` again on an already-loaded instance — create a new one instead
 
-### 3. Memory Management
+### 3. Showing Fullscreen Ads
 
 ✅ **DO:**
+- Show interstitials at natural break points (between screens, after completing a task)
+- Show rewarded ads only at explicit opt-in moments and grant the reward in `onUserRewarded`
+- On `onAdFailedToShow`, destroy the instance and load a fresh one — the simplest reliable recovery
+
+❌ **DON'T:**
+- Show a fullscreen ad mid-interaction or over active content
+- Reuse a spent instance — after `onAdDismissed` following a successful show, create a new ad object
+
+### 4. Memory Management
+
+✅ **DO:**
+- Call `destroy()` on every ad instance — native, interstitial, rewarded, or banner — when it is no longer needed
 - Clear or release ad-related views when they are no longer visible
 - Use weak references where appropriate (e.g. in delegates)
 - Clean up in `deinit` or when the view controller is dismissed
@@ -1373,7 +1812,7 @@ Best practices:
 ❌ **DON'T:**
 - Keep strong references to ad views after the screen is dismissed
 
-### 4. Error Handling
+### 5. Error Handling
 
 ✅ **DO:**
 
@@ -1459,7 +1898,7 @@ let adRequest = VelocityNativeAdRequest.Builder(adUnitId: String)
     .build() -> VelocityNativeAdRequest
 
 let nativeAd = VelocityNativeAd(adRequest)
-nativeAd.loadAd(delegate: VelocityNativeAdDelegate)
+nativeAd.load(delegate: VelocityNativeAdDelegate)
 ```
 
 **`VelocityNativeAdRequest` builder parameters:**
@@ -1523,10 +1962,10 @@ VelocityNativeAdViewRequest.Builder(adUnitId: String, adViewSize: VelocityNative
 @MainActor nativeAd.unregisterViewForInteraction()
 
 // Teardown (terminal — instance cannot be reloaded after this call)
-@MainActor nativeAd.destroyAd()
+@MainActor nativeAd.destroy()
 ```
 
-> **Note:** `createAdView()`, `createAdSwiftUIView()`, `configureAdView(_:)`, `collapse()`, `registerViewForInteraction(adView:clickableViews:)`, `unregisterViewForInteraction()`, and `destroyAd()` are annotated `@MainActor`. Calling them from a delegate callback is safe (delegate callbacks are already delivered on the main thread). From a non-isolated context, wrap the call in `DispatchQueue.main.async { }` or `await MainActor.run { }`.
+> **Note:** `createAdView()`, `createAdSwiftUIView()`, `configureAdView(_:)`, `collapse()`, `registerViewForInteraction(adView:clickableViews:)`, `unregisterViewForInteraction()`, and `destroy()` are annotated `@MainActor`. Calling them from a delegate callback is safe (delegate callbacks are already delivered on the main thread). From a non-isolated context, wrap the call in `DispatchQueue.main.async { }` or `await MainActor.run { }`.
 
 #### `VelocityNativeAd` — Interaction Tracking
 
@@ -1767,16 +2206,16 @@ Error code behavior:
 
 **SDK state errors (2xxx):**
   - `VelocityAdsErrorCode.invalidAppKey` (`2000`) — `appKey` is empty or blank
-  - `VelocityAdsErrorCode.sdkNotInitialized` (`2001`) — `loadAd` called before `initSDK`
-  - `VelocityAdsErrorCode.sdkInitializationInProgress` (`2002`) — `loadAd` called while initialization is still in progress
-  - `VelocityAdsErrorCode.loadAlreadyInProgress` (`2003`) — `loadAd` called on an ad instance that is already loading
+  - `VelocityAdsErrorCode.sdkNotInitialized` (`2001`) — `load` called before `initSDK`
+  - `VelocityAdsErrorCode.sdkInitializationInProgress` (`2002`) — `load` called while initialization is still in progress
+  - `VelocityAdsErrorCode.loadAlreadyInProgress` (`2003`) — `load` called on an ad instance that is already loading
   - `VelocityAdsErrorCode.loadServiceUnavailable` (`2004`) — Internal load service is not available
   - `VelocityAdsErrorCode.invalidAdResponse` (`2005`) — Ad response is missing required data
   - `VelocityAdsErrorCode.noFill` (`2006`) — No ad available for the given context
   - `VelocityAdsErrorCode.internalError` (`2007`) — Unexpected internal SDK error
-  - `VelocityAdsErrorCode.adAlreadyLoaded` (`2008`) — `loadAd` called on an instance that has already loaded successfully. Create a new `VelocityNativeAd` for a new ad placement.
+  - `VelocityAdsErrorCode.adAlreadyLoaded` (`2008`) — `load` called on an instance that has already loaded successfully. Create a new `VelocityNativeAd` for a new ad placement.
   - `VelocityAdsErrorCode.waterfallLoadFailed` (`2009`) — Waterfall load failed
-  - `VelocityAdsErrorCode.adDestroyed` (`2010`) — `loadAd` called on a destroyed instance. Create a new `VelocityNativeAd` for a new ad placement.
+  - `VelocityAdsErrorCode.adDestroyed` (`2010`) — `load` called on a destroyed instance. Create a new `VelocityNativeAd` for a new ad placement.
   - `VelocityAdsErrorCode.invalidAdUnitId` (`2011`) — `adUnitId` is empty or blank
 
 ### Delegates
@@ -1809,3 +2248,238 @@ protocol VelocityNativeAdDelegate: AnyObject {
 | `onAdFailedToLoad` | Main thread. Ad failed to load. |
 | `onAdImpression` | Fires once when ≥ 50 % of the ad view is visible on screen. Default implementation is a no-op. |
 | `onAdClicked` | User tapped the ad (SDK handles opening the click URL). Default implementation is a no-op. |
+
+#### `VelocityInterstitialAdDelegate`
+
+```swift
+@MainActor
+protocol VelocityInterstitialAdDelegate: AnyObject {
+    func onAdLoaded(interstitialAd: VelocityInterstitialAd)
+    func onAdFailedToLoad(interstitialAd: VelocityInterstitialAd, error: VelocityAdsError)
+    func onAdShown(interstitialAd: VelocityInterstitialAd)
+    func onAdImpression(interstitialAd: VelocityInterstitialAd)
+    func onAdFailedToShow(interstitialAd: VelocityInterstitialAd, error: VelocityAdsError)
+    func onAdClicked(interstitialAd: VelocityInterstitialAd)
+    func onAdDismissed(interstitialAd: VelocityInterstitialAd)
+}
+```
+
+All methods are delivered on the **main thread**. The protocol is `@MainActor`-annotated.
+
+| Method | Required | Description |
+|--------|----------|-------------|
+| `onAdLoaded` | ✅ | Ad loaded and ready. Call `show()` now or at a later break point. |
+| `onAdFailedToLoad` | ✅ | Load failed. `error.code` identifies the reason. Retry by calling `load(delegate:)` again. |
+| `onAdShown` | Optional | Fullscreen surface is visible. Pause game audio/timers. Default is a no-op. |
+| `onAdImpression` | Optional | Ad impression recorded. Fires after `onAdShown`, once the impression has been counted. Default is a no-op. |
+| `onAdFailedToShow` | Optional | `show()` was rejected. Ad remains ready unless expired/destroyed. Default is a no-op. |
+| `onAdClicked` | Optional | User tapped through. SDK opens click URL automatically. Default is a no-op. |
+| `onAdDismissed` | Optional | Surface dismissed — terminal callback. Release the instance and pre-load the next one. Default is a no-op. |
+
+#### `VelocityInterstitialAdRequest` / `VelocityInterstitialAd`
+
+```swift
+let adRequest = VelocityInterstitialAdRequest.Builder(adUnitId: String).build()
+
+let interstitialAd = VelocityInterstitialAd(adRequest)
+
+// Load
+interstitialAd.load(delegate: VelocityInterstitialAdDelegate)
+
+// Query state (safe from any thread)
+var isReady: Bool { get }
+
+// Show (main thread only)
+@MainActor func show()
+
+// Teardown (any thread, idempotent)
+func destroy()
+```
+
+**`VelocityInterstitialAdRequest.Builder` parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `adUnitId` | ✅ | Ad unit identifier. Leading/trailing whitespace is trimmed. Blank value fails immediately with `invalidAdUnitId` (2011). |
+
+**`VelocityInterstitialAd` properties and methods:**
+
+| Symbol | Description |
+|--------|-------------|
+| `adRequest` | The request used to create this instance. |
+| `isReady` | `true` when a creative is loaded, unexpired, and the instance is not showing or destroyed. Safe to read from any thread. |
+| `load(delegate:)` | Starts loading. Exactly one of `onAdLoaded` / `onAdFailedToLoad` fires per call. Fails with `loadAlreadyInProgress` (2003), `adAlreadyLoaded` (2008), or `adDestroyed` (2010) for invalid calls. |
+| `show()` | Presents the fullscreen surface. Must be called on the main thread. Rejections are delivered via `onAdFailedToShow`. |
+| `destroy()` | Releases all resources and silences callbacks. Idempotent. Safe from any thread. |
+
+---
+
+#### `VelocityFullscreenAdDelegate`
+
+Base delegate protocol shared by all fullscreen ad formats. Do not conform to this protocol directly — use `VelocityInterstitialAdDelegate` or `VelocityRewardedAdDelegate` instead.
+
+```swift
+@MainActor
+public protocol VelocityFullscreenAdDelegate: AnyObject {
+    func onAdLoaded(ad: any VelocityFullscreenAd)                                    // required
+    func onAdFailedToLoad(ad: any VelocityFullscreenAd, error: VelocityAdsError)     // required
+    func onAdShown(ad: any VelocityFullscreenAd)                                     // optional (default no-op)
+    func onAdImpression(ad: any VelocityFullscreenAd)                                // optional (default no-op)
+    func onAdFailedToShow(ad: any VelocityFullscreenAd, error: VelocityAdsError)     // optional (default no-op)
+    func onAdClicked(ad: any VelocityFullscreenAd)                                   // optional (default no-op)
+    func onAdDismissed(ad: any VelocityFullscreenAd)                                 // optional (default no-op)
+}
+```
+
+All callbacks are delivered on the **main thread**. The protocol is `@MainActor`-annotated.
+
+**Delegate hierarchy:**
+
+```
+VelocityFullscreenAdDelegate
+├─ VelocityInterstitialAdDelegate   (ad parameter typed as VelocityInterstitialAd)
+└─ VelocityRewardedAdDelegate       (ad parameter typed as VelocityRewardedAd; adds onUserRewarded)
+```
+
+---
+
+#### `VelocityRewardedAdDelegate`
+
+```swift
+@MainActor
+public protocol VelocityRewardedAdDelegate: VelocityFullscreenAdDelegate {
+    func onUserRewarded(ad: any VelocityFullscreenAd)   // required
+}
+```
+
+All methods are delivered on the **main thread**. The protocol is `@MainActor`-annotated.
+
+| Method | Required | Description |
+|--------|----------|-------------|
+| `onAdLoaded` | ✅ | Ad loaded and ready. Call `show()` now or at a later break point. |
+| `onAdFailedToLoad` | ✅ | Load failed. `error.code` identifies the reason. |
+| `onUserRewarded` | ✅ | User completed the video — grant the in-app reward. Fires before `onAdDismissed`. Not fired if the user skips before completion. |
+| `onAdShown` | Optional | Fullscreen surface is visible. Pause game audio/timers. Default is a no-op. |
+| `onAdImpression` | Optional | Ad impression recorded. Fires after `onAdShown`. Default is a no-op. |
+| `onAdFailedToShow` | Optional | `show()` was rejected. Ad remains ready unless expired/destroyed. Default is a no-op. |
+| `onAdClicked` | Optional | User tapped through. SDK opens click URL automatically. Default is a no-op. |
+| `onAdDismissed` | Optional | Surface dismissed — terminal callback. Release the instance and pre-load the next one. Default is a no-op. |
+
+#### `VelocityRewardedAdRequest` / `VelocityRewardedAd`
+
+```swift
+let adRequest = VelocityRewardedAdRequest.Builder(adUnitId: String).build()
+
+let rewardedAd = VelocityRewardedAd(adRequest)
+
+// Load
+rewardedAd.load(delegate: VelocityRewardedAdDelegate)
+
+// Query state (safe from any thread)
+var isReady: Bool { get }
+
+// Show (main thread only)
+@MainActor func show()
+
+// Teardown (any thread, idempotent)
+func destroy()
+```
+
+**`VelocityRewardedAdRequest.Builder` parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `adUnitId` | ✅ | Ad unit identifier. Leading/trailing whitespace is trimmed. Blank value fails immediately with `invalidAdUnitId` (2011). |
+
+**`VelocityRewardedAd` properties and methods:**
+
+| Symbol | Description |
+|--------|-------------|
+| `adRequest` | The request used to create this instance. |
+| `isReady` | `true` when a creative is loaded, unexpired, and the instance is not showing or destroyed. Safe to read from any thread. |
+| `load(delegate:)` | Starts loading. Exactly one of `onAdLoaded` / `onAdFailedToLoad` fires per call. |
+| `show()` | Presents the fullscreen surface. Must be called on the main thread. Rejections are delivered via `onAdFailedToShow`. |
+| `destroy()` | Releases all resources and silences callbacks. Idempotent. Safe from any thread. |
+
+---
+
+#### `VelocityBannerAdDelegate`
+
+Standalone protocol — banners do not share the `VelocityFullscreenAdDelegate` hierarchy (there is no `show()` / dismiss lifecycle).
+
+```swift
+@MainActor
+public protocol VelocityBannerAdDelegate: AnyObject {
+    func onAdLoaded(ad: VelocityBannerAd)                                    // required
+    func onAdFailedToLoad(ad: VelocityBannerAd, error: VelocityAdsError)     // required
+    func onAdImpression(ad: VelocityBannerAd)                                // optional (default no-op)
+    func onAdFailedToShow(ad: VelocityBannerAd, error: VelocityAdsError)     // optional (default no-op)
+    func onAdClicked(ad: VelocityBannerAd)                                   // optional (default no-op)
+}
+```
+
+All callbacks are delivered on the **main thread**. The protocol is `@MainActor`-annotated.
+
+| Method | Required | Description |
+|--------|----------|-------------|
+| `onAdLoaded` | ✅ | Ad loaded and rendering in the banner view. `intrinsicContentSize` now reports the ad size. |
+| `onAdFailedToLoad` | ✅ | Load failed. `error.code` identifies the reason. |
+| `onAdImpression` | Optional | MRC viewability impression recorded (≥ 50 % visible for ≥ 1 contiguous second). Fires at most once per instance; impression tracking URLs fire at the same moment. Default is a no-op. |
+| `onAdFailedToShow` | Optional | Rendering failed after a successful load (e.g. player crash or stall). Destroy the instance and load a new one. Default is a no-op. |
+| `onAdClicked` | Optional | User tapped through. SDK opens click URL automatically. Default is a no-op. |
+
+#### `VelocityBannerAdRequest` / `VelocityBannerAd` / `VelocityBannerAdView`
+
+```swift
+let adRequest = VelocityBannerAdRequest.Builder(adUnitId: String, adSize: VelocityBannerAdSize)
+    .withAdditionalContext(String?)   // optional
+    .build()
+
+let bannerAd = VelocityBannerAd(adRequest)
+let bannerView = VelocityBannerAdView()
+
+// Load and render (main thread only)
+@MainActor func load(bannerView: VelocityBannerAdView, delegate: VelocityBannerAdDelegate)
+
+// Teardown (any thread, idempotent)
+func destroy()
+
+// SwiftUI size forwarding (main thread — call from updateUIView)
+@MainActor func handleContainerSizeChange(_ newSize: CGSize)   // on VelocityBannerAdView
+```
+
+**`VelocityBannerAdRequest.Builder` parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `adUnitId` | ✅ | Ad unit identifier. Leading/trailing whitespace is trimmed. Blank value fails immediately with `invalidAdUnitId` (2011). |
+| `adSize` | ✅ | The banner slot size — see `VelocityBannerAdSize` below. |
+| `withAdditionalContext(_:)` | Optional | Free-form string providing extra context for ad targeting. `nil` and blank values are treated as absent. |
+
+**`VelocityBannerAd` properties and methods:**
+
+| Symbol | Description |
+|--------|-------------|
+| `adRequest` | The request used to create this instance. |
+| `load(bannerView:delegate:)` | Starts loading and, on success, renders into `bannerView`. Exactly one of `onAdLoaded` / `onAdFailedToLoad` fires per call. Fails with `loadAlreadyInProgress` (2003), `adAlreadyLoaded` (2008), or `adDestroyed` (2010) for invalid calls. Must be called on the main thread. |
+| `destroy()` | Cancels any in-flight load, tears down the player, removes rendered content from the banner view, and silences callbacks. Idempotent. Safe from any thread. |
+
+**`VelocityBannerAdView`:**
+
+A passive `UIView` container that you create, size, and place. `intrinsicContentSize` returns the bound ad size after load and `.zero` before. Size it with Auto Layout constraints or a fixed frame. In SwiftUI, forward frame changes with `handleContainerSizeChange(_:)` from `updateUIView(_:context:)`.
+
+#### `VelocityBannerAdSize`
+
+```swift
+public struct VelocityBannerAdSize: Equatable, Sendable {
+    public let width: CGFloat    // points
+    public let height: CGFloat   // points
+
+    public static let banner: VelocityBannerAdSize          // 320 × 50
+    public static let mrec: VelocityBannerAdSize            // 300 × 250
+    public static let leaderboard: VelocityBannerAdSize     // 728 × 90
+    public static func adaptiveBanner(width: CGFloat) -> VelocityBannerAdSize
+}
+```
+
+`adaptiveBanner(width:)` computes a height anchored to the 320:50 aspect ratio, clamped to [32, 90] pt.
