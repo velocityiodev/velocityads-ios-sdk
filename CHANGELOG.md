@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.10.0] - 2026-09-06
+
+### Added
+- **Rewarded Video Ads**: Added support for Rewarded Video Ads.
+- **Interstitial Ads**: Added support for Interstitial Ads.
+
+### Breaking Changes
+- **Native Ad API methods renamed** — The `Ad` suffix has been removed from both instance methods on `VelocityNativeAd`. Update all call sites:
+  - `nativeAd.loadAd(delegate:)` → `nativeAd.load(delegate:)`
+  - `nativeAd.destroyAd()` → `nativeAd.destroy()`
+
 ## [0.9.0] - 2026-07-29
 
 - Internal improvements.
