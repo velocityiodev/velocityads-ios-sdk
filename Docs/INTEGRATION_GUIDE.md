@@ -1,6 +1,6 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.10.0
+**Version:** 0.10.1
 **Last Updated:** September 2026  
 **Platform:** iOS 13.0+  
 **Language:** Swift 5.5+
@@ -59,14 +59,14 @@ On iOS, access to IDFA is controlled by **App Tracking Transparency (ATT)**. You
 
 The Velocity Ads SDK can be installed via **Swift Package Manager (SPM)** or **CocoaPods**.
 
-> **Current version: `0.10.0`**  
+> **Current version: `0.10.1`**  
 
 ### Swift Package Manager (SPM)
 
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Set the version rule to **"Exact"** and enter **`0.10.0`**, then click **Add Package**.
+3. Set the version rule to **"Exact"** and enter **`0.10.1`**, then click **Add Package**.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 The package uses a binary target hosted on GitHub Releases. Each release provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
@@ -78,7 +78,7 @@ The package uses a binary target hosted on GitHub Releases. Each release provide
 1. Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.10.0'
+pod 'VelocityAdsSDK', '0.10.1'
 ```
 
 2. Run:
@@ -2161,6 +2161,9 @@ public struct VelocityAdsError: Error, CustomStringConvertible {
 }
 ```
 
+`code` is the category to branch on. `message` is human-readable detail — log it and include it in
+support requests, but do not parse it.
+
 `VelocityAdsError` conforms to `CustomStringConvertible`, so `print(error)` includes both code and message.
 
 ```swift
@@ -2187,6 +2190,7 @@ public enum VelocityAdsErrorCode {
     public static let waterfallLoadFailed: Int         // 2009
     public static let adDestroyed: Int                 // 2010
     public static let invalidAdUnitId: Int             // 2011
+    public static let adSpent: Int                     // 2012
 }
 ```
 
@@ -2217,6 +2221,7 @@ Error code behavior:
   - `VelocityAdsErrorCode.waterfallLoadFailed` (`2009`) — Waterfall load failed
   - `VelocityAdsErrorCode.adDestroyed` (`2010`) — `load` called on a destroyed instance. Create a new `VelocityNativeAd` for a new ad placement.
   - `VelocityAdsErrorCode.invalidAdUnitId` (`2011`) — `adUnitId` is empty or blank
+  - `VelocityAdsErrorCode.adSpent` (`2012`) — `show` called on a fullscreen ad instance that was already shown. Load a new instance.
 
 ### Delegates
 
