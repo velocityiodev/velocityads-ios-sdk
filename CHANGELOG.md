@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0] - 2026-10-04
+
+### Breaking Changes
+- Raised minimum iOS deployment target to iOS 15.0.
+
+### Changed
+- `VelocityBannerAdDelegate` now inherits `Sendable`. This has no effect under default Swift 5 settings, but projects compiled in Swift 6 mode or with `-strict-concurrency=complete` may see new warnings on conforming types that carry non-`Sendable` stored properties.
+
 ## [0.10.1] - 2026-09-16
 
 - Internal improvements.

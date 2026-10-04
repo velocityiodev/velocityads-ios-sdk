@@ -1,8 +1,8 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.10.1
-**Last Updated:** September 2026  
-**Platform:** iOS 13.0+  
+**Version:** 0.11.0
+**Last Updated:** October 2026  
+**Platform:** iOS 15.0+  
 **Language:** Swift 5.5+
 
 ---
@@ -39,8 +39,8 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 
 ### System Requirements
 
-- **Minimum iOS:** 13.0
-- **Xcode:** 16.0+
+- **Minimum iOS:** 15.0
+- **Xcode:** 26.0+
 - **Swift:** 5.5+
 
 ### Advertising Identifiers
@@ -59,14 +59,14 @@ On iOS, access to IDFA is controlled by **App Tracking Transparency (ATT)**. You
 
 The Velocity Ads SDK can be installed via **Swift Package Manager (SPM)** or **CocoaPods**.
 
-> **Current version: `0.10.1`**  
+> **Current version: `0.11.0`**  
 
 ### Swift Package Manager (SPM)
 
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Set the version rule to **"Exact"** and enter **`0.10.1`**, then click **Add Package**.
+3. Set the version rule to **"Exact"** and enter **`0.11.0`**, then click **Add Package**.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 The package uses a binary target hosted on GitHub Releases. Each release provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
@@ -78,7 +78,7 @@ The package uses a binary target hosted on GitHub Releases. Each release provide
 1. Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.10.1'
+pod 'VelocityAdsSDK', '0.11.0'
 ```
 
 2. Run:
@@ -802,7 +802,7 @@ LazyVStack {
 }
 ```
 
-> **iOS 13–15 note:** `sizeThatFits` is iOS 16+. On older versions, provide an explicit `.frame(height:)` using `adView.intrinsicContentSize.height`.
+> **iOS 15 note:** `sizeThatFits` is iOS 16+. On iOS 15, provide an explicit `.frame(height:)` using `adView.intrinsicContentSize.height`.
 
 ---
 
@@ -811,7 +811,7 @@ LazyVStack {
 Use `VelocityNativeAdViewRequest` to load ad data. Call `createAdSwiftUIView()` to get an `AnyView` and host it inside the cell. The recommended hosting strategy depends on the minimum iOS version you support:
 
 - **iOS 16+:** Use `UIHostingConfiguration` assigned to `cell.contentConfiguration`. This is Apple's purpose-built, lightweight API for SwiftUI content in `UITableViewCell` / `UICollectionViewCell`. No view-controller lifecycle, no manual Auto Layout — each recycle simply reassigns `contentConfiguration`.
-- **iOS 13–15 fallback:** Retain a `UIHostingController<AnyView>` as a child view controller and replace `hostingController.rootView` on reuse.
+- **iOS 15 fallback:** Retain a `UIHostingController<AnyView>` as a child view controller and replace `hostingController.rootView` on reuse.
 
 ```swift
 import UIKit
@@ -822,7 +822,7 @@ import VelocityAdsSDK
 class SwiftUIAdCell: UITableViewCell {
     static let reuseId = "SwiftUIAdCell"
 
-    // iOS 13-15 fallback only
+    // iOS 15 fallback only
     private var hostingController: UIHostingController<AnyView>?
     private var hostingHeightConstraint: NSLayoutConstraint?
 
@@ -862,7 +862,7 @@ class SwiftUIAdCell: UITableViewCell {
     }
     // prepareForReuse: nothing required —
     // iOS 16+: contentConfiguration reassignment handles teardown.
-    // iOS 13-15: hostingController is retained; rootView is replaced in the next configure call.
+    // iOS 15: hostingController is retained; rootView is replaced in the next configure call.
 }
 ```
 
@@ -921,8 +921,8 @@ LazyVStack {
 
 | Lifecycle Event | Pattern 1: Manual | Pattern 3: SDK UIView | Pattern 5: SDK SwiftUI |
 |---|---|---|---|
-| `cellForRowAt` — first use | Populate UI from `nativeAd.data`, then `registerViewForInteraction(adView:clickableViews:)` | `createAdView()` → add to cell | `createAdSwiftUIView()` → assign `UIHostingConfiguration` (iOS 16+) or create `UIHostingController` → add to cell (iOS 13-15) |
-| `cellForRowAt` — reused cell | Identity-guarded `unregisterViewForInteraction()` at start of configure, populate UI, then `registerViewForInteraction(adView:clickableViews:)` | `configureAdView(existingAdView)` | `createAdSwiftUIView()` → reassign `contentConfiguration` (iOS 16+) or replace `hostingController.rootView` (iOS 13-15) |
+| `cellForRowAt` — first use | Populate UI from `nativeAd.data`, then `registerViewForInteraction(adView:clickableViews:)` | `createAdView()` → add to cell | `createAdSwiftUIView()` → assign `UIHostingConfiguration` (iOS 16+) or create `UIHostingController` → add to cell (iOS 15) |
+| `cellForRowAt` — reused cell | Identity-guarded `unregisterViewForInteraction()` at start of configure, populate UI, then `registerViewForInteraction(adView:clickableViews:)` | `configureAdView(existingAdView)` | `createAdSwiftUIView()` → reassign `contentConfiguration` (iOS 16+) or replace `hostingController.rootView` (iOS 15) |
 | `prepareForReuse` | `unregisterViewForInteraction()` + clear visual content | Nothing required | Nothing required |
 | `didEndDisplaying` | Nothing required | Nothing required | Nothing required |
 
