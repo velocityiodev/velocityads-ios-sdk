@@ -1,7 +1,7 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.11.0
-**Last Updated:** October 2026  
+**Version:** 0.12.0
+**Last Updated:** November 2026
 **Platform:** iOS 15.0+  
 **Language:** Swift 5.5+
 
@@ -17,14 +17,14 @@
 6. [Load-Once Semantics and Ad Lifecycle](#load-once-semantics-and-ad-lifecycle)
 7. [Loading Native Ad Views](#loading-native-ad-views)
 8. [Recycling Container Integration](#recycling-container-integration)
-9. [Collapsing Large Ads](#collapsing-large-ads)
-10. [Ad Theming and Customization](#ad-theming-and-customization)
-11. [Interstitial Ads](#interstitial-ads)
-12. [Rewarded Ads](#rewarded-ads)
-13. [Banner Ads](#banner-ads)
-14. [Regulations](#regulations)
-15. [Troubleshooting](#troubleshooting)
-16. [Best Practices](#best-practices)
+9. [Ad Theming and Customization](#ad-theming-and-customization)
+10. [Interstitial Ads](#interstitial-ads)
+11. [Rewarded Ads](#rewarded-ads)
+12. [Banner Ads](#banner-ads)
+13. [Regulations](#regulations)
+14. [Troubleshooting](#troubleshooting)
+15. [Best Practices](#best-practices)
+16. [Migrating to 0.12.0 (Native Ads)](#migrating-to-0120-native-ads)
 17. [API Reference](#api-reference)
 
 ---
@@ -43,6 +43,28 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 - **Xcode:** 26.0+
 - **Swift:** 5.5+
 
+### Apple Ad Attribution
+
+To support Apple app-install attribution, add Velocity's ad network identifier
+to both attribution arrays in the host app target's `Info.plist`. Apple permits
+the same `.adattributionkit` identifier in `AdNetworkIdentifiers` and
+`SKAdNetworkItems`:
+
+```xml
+<key>AdNetworkIdentifiers</key>
+<array>
+    <string>rwn33vua23.adattributionkit</string>
+</array>
+<key>SKAdNetworkItems</key>
+<array>
+    <dict>
+        <key>SKAdNetworkIdentifier</key>
+        <string>rwn33vua23.adattributionkit</string>
+    </dict>
+</array>
+```
+
+
 ### Advertising Identifiers
 
 The Velocity Ads SDK uses **IDFA** (Identifier for Advertisers) and **IDFV** (Identifier for Vendor) when available to improve ad performance and relevance. These identifiers enable:
@@ -59,14 +81,14 @@ On iOS, access to IDFA is controlled by **App Tracking Transparency (ATT)**. You
 
 The Velocity Ads SDK can be installed via **Swift Package Manager (SPM)** or **CocoaPods**.
 
-> **Current version: `0.11.0`**  
+> **Current version: `0.12.0`**  
 
 ### Swift Package Manager (SPM)
 
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Set the version rule to **"Exact"** and enter **`0.11.0`**, then click **Add Package**.
+3. Set the version rule to **"Exact"** and enter **`0.12.0`**, then click **Add Package**.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 The package uses a binary target hosted on GitHub Releases. Each release provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
@@ -78,7 +100,7 @@ The package uses a binary target hosted on GitHub Releases. Each release provide
 1. Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.11.0'
+pod 'VelocityAdsSDK', '0.12.0'
 ```
 
 2. Run:
@@ -160,7 +182,7 @@ For best performance, call `VelocityAds.setUserId(_:)` before `VelocityAds.initS
 The SDK provides a method for loading native ads:
 
 - **`VelocityNativeAdRequest`** — Immutable request object built via a fluent builder. Holds all targeting context.
-- **`VelocityNativeAd`** — The ad object. Create one from a request and call `load(delegate:)` to trigger loading. Ad properties (`title`, `description`, etc.) are populated when `onAdLoaded` is called.
+- **`VelocityNativeAd`** — The ad object. Create one from a request and call `load(delegate:)` to trigger loading. The creative data (`nativeAd.data`, a `NativeAd` with `title`, `description`, etc.) is populated when `onAdLoaded` is called.
 
 > **Threading:** All `VelocityNativeAdDelegate` callbacks are always delivered on the **main thread** — you can update your UI directly without dispatching. The protocol is annotated `@MainActor` to express this guarantee to the Swift type system. If you build with **Swift 6** or with `SWIFT_STRICT_CONCURRENCY = complete`, your conforming type must be `@MainActor`-isolated (e.g. `UIViewController` already is); otherwise the compiler will emit an error. Under Swift 5 without strict concurrency, no annotation is required, but adding it is recommended.
 
@@ -185,14 +207,25 @@ class MyViewController: UIViewController, VelocityNativeAdDelegate {
     func onAdLoaded(nativeAd: VelocityNativeAd) {
         guard let data = nativeAd.data else { return }
 
-        // Ad properties are now available
-        // Display ad manually
-        titleLabel.text = data.title
-        descriptionLabel.text = data.description
-        ctaButton.setTitle(data.callToAction, for: .normal)
+        // Display the ad. Every creative field is optional — show each view only when the
+        // ad has a value for it (see `show(_:in:)` below).
+        show(data.advertiserName, in: advertiserNameLabel)
+        show(data.badgeLabel, in: badgeLabel)               // ad disclosure badge, e.g. "Ad"
+        show(data.title, in: titleLabel)
+        show(data.description, in: descriptionLabel)
+        if let callToAction = data.callToAction {
+            ctaButton.setTitle(callToAction, for: .normal)
+            ctaButton.isHidden = false
+        } else {
+            ctaButton.isHidden = true
+        }
 
-        // Load image (e.g. with URLSession or a library like SDWebImage)
-        if let imageUrl = data.largeImageUrl ?? data.squareImageUrl {
+        // Load an image (e.g. with URLSession or a library like SDWebImage).
+        // `imagesByAspectRatio` holds every image, keyed by aspect-ratio string;
+        // `images(for:)` returns every image of one ratio (an empty array when absent).
+        let landscapeImages = data.images(for: "1.9:1")
+        let squareImages = data.images(for: "1:1")
+        if let imageUrl = landscapeImages.first ?? squareImages.first {
             loadImage(from: imageUrl, into: adImageView)
         }
 
@@ -216,10 +249,20 @@ class MyViewController: UIViewController, VelocityNativeAdDelegate {
     func onAdClicked(nativeAd: VelocityNativeAd) {
         // Fired when the user taps the ad (SDK handles opening the click URL)
     }
+
+    /// Shows `text` in `label`, or hides the label when the ad has no value for it.
+    private func show(_ text: String?, in label: UILabel) {
+        guard let text else {
+            label.isHidden = true
+            return
+        }
+        label.text = text
+        label.isHidden = false
+    }
 }
 ```
 
-> **Note:** `onAdImpression` and `onAdClicked` have default no-op implementations via a protocol extension, so you can omit them if you don't need impression/click tracking in your delegate implementation.
+> **Note:** `onAdImpression` and `onAdClicked` have default no-op implementations via a protocol extension.
 
 ### Automatic Impression and Click Tracking
 
@@ -231,9 +274,9 @@ For UIKit apps using manual rendering, call `registerViewForInteraction` after l
 func onAdLoaded(nativeAd: VelocityNativeAd) {
     guard let data = nativeAd.data else { return }
 
-    // Set up your ad views...
-    titleLabel.text = data.title
-    descriptionLabel.text = data.description
+    // Set up your ad views (`show(_:in:)` is the helper from the example above)...
+    show(data.title, in: titleLabel)
+    show(data.description, in: descriptionLabel)
 
     // Register the container view for automatic impression tracking
     // (impression fires when ≥ 50 % of adContainerView is visible)
@@ -278,8 +321,9 @@ struct AdCardView: View {
 
     var body: some View {
         VStack {
-            Text(nativeAd.data?.title ?? "")
-            Text(nativeAd.data?.description ?? "")
+            // Every creative field is optional — render each only when present
+            if let title = nativeAd.data?.title { Text(title) }
+            if let description = nativeAd.data?.description { Text(description) }
             // ... render ad content
         }
         .velocityAdTracking(nativeAd)  // Enables automatic tracking
@@ -319,7 +363,7 @@ nativeAd2.load(delegate: self)
 
 ### Preliminary Text
 
-When `.includePreliminaryText(true)` is set on the request, the server returns a short contextual sentence in `nativeAd.data?.preliminaryText`. Display it directly above the ad — outside the ad view's frame — so it does not affect the ad's layout or height.
+When `.includePreliminaryText(true)` is set on the request, the ad may include a short contextual sentence in `nativeAd.data?.preliminaryText`. Display it directly above the ad — outside the ad view's frame — so it does not affect the ad's layout or height.
 
 ```swift
 // Request with preliminary text enabled
@@ -347,9 +391,9 @@ func onAdLoaded(nativeAd: VelocityNativeAd) {
         preliminaryLabel.isHidden = true
     }
 
-    // Render ad content...
-    titleLabel.text = data.title
-    descriptionLabel.text = data.description
+    // Render ad content (`show(_:in:)` is the helper from the example above)...
+    show(data.title, in: titleLabel)
+    show(data.description, in: descriptionLabel)
 }
 ```
 
@@ -383,26 +427,29 @@ Created → load() → Loading → success → Loaded → destroy() → Destroye
 
 - **Load once:** After a successful load, calling `load()` again on the same instance returns `VelocityAdsErrorCode.adAlreadyLoaded` (`2008`). Create a new `VelocityNativeAd` instance for each ad placement.
 - **Retry on failure:** If a load fails, you may call `load()` again on the same instance.
-- **Terminal after destroy:** After `destroy()`, the instance is inert. `load()` returns `adAlreadyLoaded`; `createAdView()` / `createAdSwiftUIView()` return `nil`; `configureAdView()` / `registerViewForInteraction()` are no-ops.
+- **Terminal after destroy:** After `destroy()`, the instance is inert. `load()` returns `VelocityAdsErrorCode.adDestroyed` (`2010`); `createAdView()` / `createAdSwiftUIView()` return `nil`; `configureAdView()` / `registerViewForInteraction()` are no-ops.
 - **`adRequest` remains readable** after destroy (it is a `let` constant), but **`data` is set to `nil`** by `destroy()`. The instance should not be used further.
 
 ---
 
 ## Loading Native Ad Views
 
-The SDK can render ad views for you — no custom UI needed. To use this path, load with `VelocityNativeAdViewRequest` instead of the base `VelocityNativeAdRequest`. The view request adds two parameters:
+The SDK can render ad views for you — no custom UI needed. The card is rendered by the SDK inside a `VelocityNativeAdView`. To use this path, load with `VelocityNativeAdViewRequest` instead of the base `VelocityNativeAdRequest`. The view request adds two parameters:
 
-- **`adViewSize`** (required) — tells the server which layout template to select (`.S`, `.M`, or `.L`).
-- **`configuration`** (optional) — controls theming (colors, typography, dark mode). See [Ad Theming and Customization](#ad-theming-and-customization).
+- **`adViewHeights`** (optional) — the card heights your placement can host (`.height120`, `.height254`). Omitted or empty means every height this SDK supports. The ad is rendered at one of them.
+- **`configuration`** (optional) — controls theming (colors, typography, dark mode, corner radius). See [Ad Theming and Customization](#ad-theming-and-customization).
 
-After a successful load, call `createAdView()` or `createAdSwiftUIView()` to get a self-contained view with built-in impression and click tracking.
+After a successful load, call `createAdView()` or `createAdSwiftUIView()` to get a self-contained view with built-in impression and click tracking. The view sizes itself — place it in your layout as it is, with no height constraint (see [The view owns its height](#the-view-owns-its-height)).
 
 ### `VelocityNativeAdViewRequest`
 
-Build the request using the fluent builder. Both `adUnitId` and `adViewSize` are required; all other parameters are optional and inherited from `VelocityNativeAdRequest`.
+Build the request using the fluent builder. Only `adUnitId` is required; all other parameters are optional and inherited from `VelocityNativeAdRequest`.
 
 ```swift
-let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adViewSize: .M)
+let adRequest = VelocityNativeAdViewRequest.Builder(
+    adUnitId: "ad_unit_123",
+    adViewHeights: [.height254]            // Optional — omit to allow every height (120 pt and 254 pt)
+)
     .withPrompt("Best noise-cancelling headphones")                 // Optional: Provide for context
     .withAIResponse("The Sony WH-1000XM5 offers excellent ANC...")  // Optional: Provide for better targeting
     .withConversationHistory(conversationHistory)                   // Optional: Previous conversation
@@ -418,14 +465,25 @@ let nativeAd = VelocityNativeAd(adRequest)
 nativeAd.load(delegate: self)
 ```
 
-| Size | Constant | Height |
-|------|----------|--------|
-| Extra Small | `.XS` | 64 pt |
-| Small | `.S` | 100 pt |
-| Medium | `.M` | 158 pt |
-| Large | `.L` | 280 pt |
+### Ad View Heights
 
-> **Choosing a size:** Pick the size that best fits your layout. The server uses the size to select the right creative template; changing the size after load requires a new `VelocityNativeAd` instance.
+`VelocityNativeAdViewHeight` lists the card heights an SDK-rendered ad can take. The request declares which ones the placement allows; the ad is rendered at one of them.
+
+| Height | Points |
+|--------|--------|
+| `.height120` | 120 pt |
+| `.height254` | 254 pt |
+
+Passing `adViewHeights` is optional: omit it, or pass an empty array, to allow every supported height. Duplicates are ignored and order carries no preference. The ad is rendered at one of the heights you allow. Only heights defined in this SDK version are served.
+
+### The view owns its height
+
+`VelocityNativeAdView` sizes itself — it does what `wrap_content` does on Android:
+
+1. When the view is created or configured, it takes its height — one of the heights the request allows — and in normal operation keeps it. Until the ad is displayed it draws a placeholder (card background and media frame, following Light/Dark mode, the configured corner radius and `cardBackground`) at that size, so the slot is never a transparent gap.
+2. If the loaded ad cannot be rendered, the view collapses to 0 pt and stays empty until an ad is configured into it again; nothing is reported to the delegate.
+
+The view reports its height through `intrinsicContentSize` / `sizeThatFits`; a `UITableView` / `UICollectionView` row hosting it is re-measured automatically when its height changes (for example the collapse). Pin the view's leading, trailing, top and bottom edges — **not its height** — and do not derive a height from `adViewHeights`: the view owns its height, including the collapse, and a pinned height would hide it. Width follows the superview. The rendered height and media are not exposed as an API. In SwiftUI, use `createAdSwiftUIView()` rather than wrapping the view in your own `UIViewRepresentable`: the SDK's SwiftUI view follows the view's height, including the collapse to 0, on every supported iOS version.
 
 ### Creating Ad Views
 
@@ -435,12 +493,15 @@ Views return `nil` if the request was a plain `VelocityNativeAdRequest`, if `loa
 
 #### `createAdView() -> VelocityNativeAdView?`
 
-Creates a pre-built UIKit ad view. Impression and click tracking are handled automatically inside the returned view.
+Creates a pre-built UIKit ad view. Impression and click tracking are handled automatically inside the returned view. Pin its edges only — the view owns its height, and a container without a fixed height follows it.
 
 ```swift
 func onAdLoaded(nativeAd: VelocityNativeAd) {
     guard let adView = nativeAd.createAdView() else { return }
+    adView.translatesAutoresizingMaskIntoConstraints = false
     adContainer.addSubview(adView)
+    // No height constraint: the view owns its height (one of the allowed
+    // heights, or 0 if the ad cannot be rendered).
     NSLayoutConstraint.activate([
         adView.leadingAnchor.constraint(equalTo: adContainer.leadingAnchor),
         adView.trailingAnchor.constraint(equalTo: adContainer.trailingAnchor),
@@ -452,12 +513,15 @@ func onAdLoaded(nativeAd: VelocityNativeAd) {
 
 #### `createAdSwiftUIView() -> AnyView?`
 
-Creates a pre-built SwiftUI ad view. No `UIViewRepresentable` bridging needed — embed it directly.
+Creates a pre-built SwiftUI ad view. No `UIViewRepresentable` bridging needed — embed it directly. The view applies the card's height itself and follows it, including the collapse to 0 if the ad cannot be rendered; do not wrap it in `.frame(height:)`.
 
 ```swift
 func onAdLoaded(nativeAd: VelocityNativeAd) {
     self.adView = nativeAd.createAdSwiftUIView()
 }
+
+// In body:
+if let adView { adView.frame(maxWidth: .infinity) }   // no fixed height
 ```
 
 **Return value:** Both `createAdView()` and `createAdSwiftUIView()` return `nil` if:
@@ -465,7 +529,7 @@ func onAdLoaded(nativeAd: VelocityNativeAd) {
 - The `adRequest` was a plain `VelocityNativeAdRequest` instead of `VelocityNativeAdViewRequest`.
 - The instance has been destroyed via `destroy()`.
 
-> **Note:** Publishers using the manual rendering path (`VelocityNativeAdRequest`) do not call `createAdView` or `createAdSwiftUIView`. Use `registerViewForInteraction(adView:clickableViews:)` instead to wire impression and click tracking.
+> **Note:** Publishers using the manual rendering path (`VelocityNativeAdRequest`) do not call `createAdView` or `createAdSwiftUIView`. Use `registerViewForInteraction(adView:clickableViews:)` instead to enable impression and click tracking.
 
 ---
 
@@ -493,7 +557,7 @@ if let existingAdView = cell.adView {
 }
 ```
 
-Internally, `configureAdView` updates all displayed fields, resets the impression tracker when the ad identity changes, and re-wires the click URL. No `prepareForReuse` cleanup is needed — teardown is handled automatically.
+`configureAdView` swaps in the new ad (the view takes one of the heights the request allows, restoring normal sizing after a collapse; a hosting row is re-measured automatically if the height changes), resets impression tracking when the ad identity changes, and updates the click destination. It returns `false` (and does nothing) if the ad is not loaded, was destroyed, was not loaded with a `VelocityNativeAdViewRequest`, or is called off the main thread. No `prepareForReuse` cleanup is needed — teardown is handled automatically.
 
 ---
 
@@ -561,8 +625,19 @@ class ManualAdCell: UITableViewCell {
             previous.unregisterViewForInteraction()
         }
         currentAd = nativeAd
-        titleLabel.text = nativeAd.data?.title
-        ctaButton.setTitle(nativeAd.data?.callToAction, for: .normal)
+        // Every creative field is optional — show each view only when the ad has a value for it.
+        if let title = nativeAd.data?.title {
+            titleLabel.text = title
+            titleLabel.isHidden = false
+        } else {
+            titleLabel.isHidden = true
+        }
+        if let callToAction = nativeAd.data?.callToAction {
+            ctaButton.setTitle(callToAction, for: .normal)
+            ctaButton.isHidden = false
+        } else {
+            ctaButton.isHidden = true
+        }
         nativeAd.registerViewForInteraction(adView: contentView, clickableViews: [ctaButton])
     }
 
@@ -617,11 +692,16 @@ struct ManualAdCardView: View {
     var body: some View {
         let data = nativeAd.data
         VStack(alignment: .leading, spacing: 8) {
-            Text(data?.title ?? "")
-                .font(.headline)
-            Text(data?.description ?? "")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            // Every creative field is optional — render each one only when present.
+            if let title = data?.title {
+                Text(title)
+                    .font(.headline)
+            }
+            if let description = data?.description {
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
             if let cta = data?.callToAction {
                 Text(cta)
                     .font(.callout.bold())
@@ -665,7 +745,7 @@ struct ChatView: View {
 
 ### Pattern 3: SDK-Rendered UIView (UIKit Recycling Container)
 
-Use `VelocityNativeAdViewRequest` to load ad data. Pre-load ads before binding to cells. Create the `VelocityNativeAdView` once per cell with `createAdView()`; call `configureAdView` on reuse to swap the ad data without recreating the view hierarchy. The view is retained in the cell across `prepareForReuse`.
+Use `VelocityNativeAdViewRequest` to load ad data. Pre-load ads before binding to cells. Create the `VelocityNativeAdView` once per cell with `createAdView()`; call `configureAdView` on reuse to swap the ad data without recreating the view hierarchy. The view is retained in the cell across `prepareForReuse`. Use self-sizing rows (`UITableView.automaticDimension`) and pin the view's edges only: the view owns its height and the row follows it, including the collapse to 0 if the ad cannot be rendered.
 
 ```swift
 import UIKit
@@ -676,7 +756,7 @@ class FeedViewController: UIViewController, UITableViewDataSource, VelocityNativ
     private var nativeAds: [UUID: VelocityNativeAd] = [:]
 
     private func loadAd(for messageId: UUID, prompt: String) {
-        let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: adUnitId, adViewSize: .M)
+        let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: adUnitId)   // every height this SDK supports
             .withPrompt(prompt)
             .build()
 
@@ -730,6 +810,7 @@ class SDKAdCell: UITableViewCell {
         }
     }
     // prepareForReuse: nothing required — configureAdView handles teardown internally
+    // No height constraint on adView: the row is self-sizing and follows the view.
 }
 ```
 
@@ -737,9 +818,11 @@ class SDKAdCell: UITableViewCell {
 
 ### Pattern 4: SDK-Rendered UIView (SwiftUI Lazy Container)
 
+> **Prefer Pattern 6 in SwiftUI.** `createAdSwiftUIView()` follows the card's height, including the collapse to 0 after a render failure, on every supported iOS version. Use this pattern only if you need the `UIView` itself, and only on iOS 16+ (see the iOS 15 note below).
+
 Use `VelocityNativeAdViewRequest` to load ad data. Cache the `VelocityNativeAdView` in `@State` so it is created once per `ForEach` identity. Wrap it in a publisher-written `UIViewRepresentable`. No `configureAdView` is needed — each ad identity keeps its own cached view.
 
-Create the view in `onAppear` rather than in `init`. Swift eagerly evaluates `State(initialValue:)` arguments on every `body` re-evaluation, producing a throwaway `VelocityNativeAdView` on each re-render that overwrites the ad's internal `currentAdView` reference before being immediately discarded. The `onAppear` guard (`guard cachedAdView == nil`) ensures creation happens exactly once per `ForEach` identity.
+Create the view in `onAppear` rather than in `init`. Swift eagerly evaluates `State(initialValue:)` arguments on every `body` re-evaluation, producing a throwaway `VelocityNativeAdView` on each re-render that displaces the view in use before being immediately discarded. The `onAppear` guard (`guard cachedAdView == nil`) ensures creation happens exactly once per `ForEach` identity.
 
 ```swift
 import SwiftUI
@@ -754,7 +837,6 @@ struct AdRowView: View {
             if let adView = cachedAdView {
                 SDKAdViewRepresentable(adView: adView)
                     .frame(maxWidth: .infinity)
-                    .frame(height: adView.intrinsicContentSize.height)
             } else {
                 Color.clear.frame(height: 0)
             }
@@ -777,7 +859,7 @@ struct SDKAdViewRepresentable: UIViewRepresentable {
         uiView.setNeedsLayout()
     }
 
-    // iOS 16+: use sizeThatFits for automatic height
+    // iOS 16+: size from the view's current intrinsic height
     @available(iOS 16.0, *)
     func sizeThatFits(
         _ proposal: ProposedViewSize,
@@ -802,16 +884,16 @@ LazyVStack {
 }
 ```
 
-> **iOS 15 note:** `sizeThatFits` is iOS 16+. On iOS 15, provide an explicit `.frame(height:)` using `adView.intrinsicContentSize.height`.
+> **iOS 15 note:** `UIViewRepresentable.sizeThatFits` is iOS 16+, and on iOS 15 a publisher-written representable cannot follow the card's height: a `.frame(height: adView.intrinsicContentSize.height)` is a one-time snapshot that misses the collapse to 0 after a render failure. On iOS 15, host the ad with `createAdSwiftUIView()` ([Pattern 6](#pattern-6-sdk-rendered-swiftui-swiftui-lazy-container)) instead.
 
 ---
 
 ### Pattern 5: SDK-Rendered SwiftUI (UIKit Recycling Container)
 
-Use `VelocityNativeAdViewRequest` to load ad data. Call `createAdSwiftUIView()` to get an `AnyView` and host it inside the cell. The recommended hosting strategy depends on the minimum iOS version you support:
+Use `VelocityNativeAdViewRequest` to load ad data. Call `createAdSwiftUIView()` to get an `AnyView` and host it inside the cell. The SwiftUI view carries the card's height itself, so the cell must not pin one — use self-sizing rows. The recommended hosting strategy depends on the minimum iOS version you support:
 
-- **iOS 16+:** Use `UIHostingConfiguration` assigned to `cell.contentConfiguration`. This is Apple's purpose-built, lightweight API for SwiftUI content in `UITableViewCell` / `UICollectionViewCell`. No view-controller lifecycle, no manual Auto Layout — each recycle simply reassigns `contentConfiguration`.
-- **iOS 15 fallback:** Retain a `UIHostingController<AnyView>` as a child view controller and replace `hostingController.rootView` on reuse.
+- **iOS 16+:** Use `UIHostingConfiguration` assigned to `cell.contentConfiguration`. This is Apple's purpose-built, lightweight API for SwiftUI content in `UITableViewCell` / `UICollectionViewCell`. No view-controller lifecycle, no manual Auto Layout — each recycle simply reassigns `contentConfiguration`, and the row follows the hosted view's height.
+- **iOS 15 fallback:** Retain a `UIHostingController<AnyView>` as a child view controller, pin its view's edges (no height constraint) and replace `hostingController.rootView` on reuse. The row is re-measured automatically when the card's height changes (for example the collapse to 0).
 
 ```swift
 import UIKit
@@ -824,22 +906,19 @@ class SwiftUIAdCell: UITableViewCell {
 
     // iOS 15 fallback only
     private var hostingController: UIHostingController<AnyView>?
-    private var hostingHeightConstraint: NSLayoutConstraint?
 
     func configure(nativeAd: VelocityNativeAd) {
         guard let swiftUIView = nativeAd.createAdSwiftUIView() else { return }
-        let adHeight: CGFloat = (nativeAd.adRequest as? VelocityNativeAdViewRequest)?.adViewSize.heightPt ?? 100
 
         if #available(iOS 16.0, *) {
             contentConfiguration = UIHostingConfiguration {
                 swiftUIView
             }
             .margins(.all, 16)
-            .minSize(width: 0, height: adHeight)
+            // No minSize / fixed height: the ad view sizes itself.
         } else {
             if let hc = hostingController {
                 hc.rootView = swiftUIView
-                hostingHeightConstraint?.constant = adHeight
             } else {
                 let hc = UIHostingController(rootView: swiftUIView)
                 hc.view.backgroundColor = .clear
@@ -848,14 +927,12 @@ class SwiftUIAdCell: UITableViewCell {
 
                 contentView.addSubview(hc.view)
                 let p: CGFloat = 16
-                let heightC = hc.view.heightAnchor.constraint(equalToConstant: adHeight)
-                hostingHeightConstraint = heightC
+                // Edges only — the hosted ad view owns its height.
                 NSLayoutConstraint.activate([
                     hc.view.topAnchor.constraint(equalTo: contentView.topAnchor, constant: p),
                     hc.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -p),
                     hc.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: p),
                     hc.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -p),
-                    heightC,
                 ])
             }
         }
@@ -866,7 +943,7 @@ class SwiftUIAdCell: UITableViewCell {
 }
 ```
 
-> **Note:** Unlike the UIView recycling path (Pattern 3), there is no `configureAdView` equivalent for this path. Each `createAdSwiftUIView()` call creates a new internal `VelocityNativeAdView`, so the view is replaced entirely on every recycle. On iOS 16+, `UIHostingConfiguration` avoids the view-controller lifecycle overhead, reducing per-cell cost compared to the `UIHostingController` fallback. For performance-sensitive lists with high scroll velocity, prefer Pattern 3 (SDK UIView in UIKit recycling container). Pattern 5 is best suited when you need SwiftUI rendering inside a UIKit collection and the list size is moderate.
+> **Note:** Unlike the UIView recycling path (Pattern 3), there is no `configureAdView` equivalent for this path. Each `createAdSwiftUIView()` call creates a new ad view, so the view is replaced entirely on every recycle. On iOS 16+, `UIHostingConfiguration` avoids the view-controller lifecycle overhead, reducing per-cell cost compared to the `UIHostingController` fallback. For performance-sensitive lists with high scroll velocity, prefer Pattern 3 (SDK UIView in UIKit recycling container). Pattern 5 is best suited when you need SwiftUI rendering inside a UIKit collection and the list size is moderate.
 
 ---
 
@@ -922,7 +999,8 @@ LazyVStack {
 | Lifecycle Event | Pattern 1: Manual | Pattern 3: SDK UIView | Pattern 5: SDK SwiftUI |
 |---|---|---|---|
 | `cellForRowAt` — first use | Populate UI from `nativeAd.data`, then `registerViewForInteraction(adView:clickableViews:)` | `createAdView()` → add to cell | `createAdSwiftUIView()` → assign `UIHostingConfiguration` (iOS 16+) or create `UIHostingController` → add to cell (iOS 15) |
-| `cellForRowAt` — reused cell | Identity-guarded `unregisterViewForInteraction()` at start of configure, populate UI, then `registerViewForInteraction(adView:clickableViews:)` | `configureAdView(existingAdView)` | `createAdSwiftUIView()` → reassign `contentConfiguration` (iOS 16+) or replace `hostingController.rootView` (iOS 15) |
+| `cellForRowAt` — reused cell | Identity-guarded `unregisterViewForInteraction()` at start of configure, populate UI, then `registerViewForInteraction(adView:clickableViews:)` | `configureAdView(existingAdView)` — the view keeps owning its height | `createAdSwiftUIView()` → reassign `contentConfiguration` (iOS 16+) or replace `hostingController.rootView` (iOS 15) |
+| Row height | Your layout | Self-sizing — pin edges only; the row is re-measured automatically when the height changes (e.g. the collapse) | Self-sizing — no `minSize` / height constraint |
 | `prepareForReuse` | `unregisterViewForInteraction()` + clear visual content | Nothing required | Nothing required |
 | `didEndDisplaying` | Nothing required | Nothing required | Nothing required |
 
@@ -939,110 +1017,11 @@ LazyVStack {
 
 ---
 
-## Collapsing Large Ads
-
-Large (`L`) ad views support an expand/collapse animation. When collapsed, the ad card shrinks to Medium height (158pt) and displays a "See more" bar with a gradient overlay at the bottom. The user can tap "See more" to expand the ad back to full height (280pt).
-
-This is useful when you want to reduce the visual footprint of an ad after it has been shown (e.g. after the user scrolls past it).
-
-### Usage
-
-Call `collapse()` on the `VelocityNativeAd` instance after the ad view has been created and attached:
-
-```swift
-nativeAd.load(delegate: self)
-
-// In VelocityNativeAdDelegate.onAdLoaded:
-func onAdLoaded(nativeAd: VelocityNativeAd) {
-    guard let adView = nativeAd.createAdView() else { return }
-    container.addSubview(adView)
-
-    // Later, when you want to collapse (e.g. after the user scrolls past):
-    nativeAd.collapse()
-}
-```
-
-You can also call `collapse()` directly on the `VelocityNativeAdView`:
-
-```swift
-guard let adView = nativeAd.createAdView() else { return }
-container.addSubview(adView)
-
-// Later:
-adView.collapse()
-```
-
-> **Threading:** Both `VelocityNativeAd.collapse()` and `VelocityNativeAdView.collapse()` must be called on the main thread. `VelocityNativeAd.collapse()` is annotated `@MainActor`. Calling it from `onAdLoaded` or a UIKit action handler (e.g. an `@objc` button tap) is safe because those already run on the main thread. From a non-isolated context, dispatch via `DispatchQueue.main.async { nativeAd.collapse() }`.
-
-### Behavior
-
-| Action | Result |
-|--------|--------|
-| `nativeAd.collapse()` or `adView.collapse()` | Animates the card from full height (280pt) to compact height (158pt) with a fade-in "See more" bar |
-| User taps "See more" | Animates back to full height; the publisher cannot programmatically expand — only the user can |
-| Calling `collapse()` on a Small or Medium ad | No-op (logs a warning) |
-| Calling `collapse()` before `createAdView()` / `configureAdView(_:)` | No-op (logs a warning) |
-
-### RecyclerView / UITableView Support
-
-The collapse state is persisted on the `VelocityNativeAd` instance. When a `UITableView` or `UICollectionView` recycles and rebinds the view via `configureAdView(_:)`, the view is restored to the correct collapsed or expanded state without animation. This means:
-
-- If the user expanded the ad, scrolled away, and scrolled back — the ad remains expanded.
-- If the publisher collapsed the ad, the user scrolled away, and scrolled back — the ad remains collapsed.
-
-### Responding to Height Changes
-
-When the ad collapses or expands, the SDK fires a callback so you can animate your container's height in sync with the card's internal animation. Two equivalent observation points are provided — choose the one that fits your rendering path.
-
-#### UIKit (and SwiftUI publishers who hold the `VelocityNativeAdView`)
-
-If you have a direct reference to a `VelocityNativeAdView` — i.e. you called `createAdView()` and kept the result, or you're inside a `UITableViewCell` that owns the view — assign `view.onCollapseStateChanged`:
-
-```swift
-adView.onCollapseStateChanged = { [weak self] isCollapsed in
-    guard let self else { return }
-    let newHeight = isCollapsed
-        ? VelocityNativeAdViewSize.largeCollapsedHeightPt
-        : VelocityNativeAdViewSize.largeExpandedHeightPt
-    UIView.animate(withDuration: 0.15) {
-        self.adViewHeightConstraint?.constant = newHeight
-        self.containerHeightConstraint?.constant = newHeight
-        self.view.layoutIfNeeded()
-    }
-}
-```
-
-#### SwiftUI (when you called `createAdSwiftUIView()`)
-
-`createAdSwiftUIView()` returns an opaque `AnyView`, so you don't have a `VelocityNativeAdView` reference to attach a callback to. In that case, observe the same state change on the `VelocityNativeAd` instance you already hold:
-
-```swift
-@State private var adViewHeight: CGFloat = VelocityNativeAdViewSize.largeExpandedHeightPt
-
-// inside body:
-adSwiftUIView
-    .frame(height: adViewHeight)
-    .onAppear {
-        nativeAd.onCollapseStateChanged = { isCollapsed in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                adViewHeight = isCollapsed
-                    ? VelocityNativeAdViewSize.largeCollapsedHeightPt
-                    : VelocityNativeAdViewSize.largeExpandedHeightPt
-            }
-        }
-    }
-```
-
-> **Avoid retain cycles.** The closure is held strongly by `nativeAd` until replaced or `destroy()` is called. Do not capture `nativeAd` or any object that holds a strong reference back to `nativeAd` (such as a `VelocityNativeAdView` returned by `createAdView()`) inside the closure — doing so creates a cycle that leaks both objects. Capture only lightweight values such as SwiftUI `@State` bindings and height constants, as shown above.
-
-Both callbacks fire on the main thread immediately before the card's internal height animation begins, so your constraint or `@State` update animates in parallel with the card. They are equivalent in behavior — pick whichever matches your call site. Setting both is supported but unnecessary.
-
----
-
 ## Ad Theming and Customization
 
-When using `VelocityNativeAdViewRequest`, you can fully customize the ad card appearance via `AdViewConfiguration`.
+When using `VelocityNativeAdViewRequest`, you can customize the ad card's appearance via `AdViewConfiguration`. The configuration is intentionally narrow: colors for eight tokens, a font family and text size for the title, the description and the CTA, a Light/Dark override, the card's corner radius. Everything else — brand-name color, the Ad badge, the scrim and on-image chrome, card heights, image sizes and crops, layout, spacing, line clamps and click behavior — is locked by Velocity.
 
+Everything left unset (`nil`) keeps the Velocity default. Set only what you need. An invalid value for a supported property (a radius outside 0–24 or a non-positive text size) is ignored with a warning log and the default stays.
 
 ### Custom Colors
 
@@ -1062,7 +1041,7 @@ let config = AdViewConfiguration(
         .build()
 )
 
-let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adViewSize: .M)
+let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123")
     .withPrompt("...")
     .withAdViewConfiguration(config)
     .build()
@@ -1071,50 +1050,46 @@ let nativeAd = VelocityNativeAd(adRequest)
 nativeAd.load(delegate: self)
 ```
 
+A single mode can be customized on its own — `AdColorScheme(dark: AdColors(ctaBackground: brand))` keeps every light default. A border-only CTA is a clear fill with a border and a label readable on the card:
+
+```swift
+AdColors(ctaBackground: .clear, ctaBorder: brand, ctaText: brand)
+```
+
 #### Available Color Tokens
+
+Every token is `UIColor?`; `nil` keeps the Velocity default.
 
 | Token | Description |
 |-------|-------------|
-| `cardBackground` | Ad card surface color |
-| `titleText` | Title text color |
-| `descriptionText` | Description text color |
-| `brandText` | Advertiser brand name color |
-| `brandIconBorder` | Advertiser brand icon border color |
-| `cardBorder` | Ad card outer border color |
-| `sponsoredLabelText` | "Sponsored" label text color |
-| `sponsoredBadgeBackground` | Badge background (e.g. "ad" pill) |
-| `sponsoredBadgeText` | Badge text color |
-| `ctaBackground` | CTA button background |
-| `ctaText` | CTA button text color |
-| `ctaBorder` | CTA button border color |
-| `chevronIconTint` | Chevron icon tint |
+| `cardBackground` | Card surface |
+| `cardBackgroundPressed` | Card surface while pressed |
+| `cardBorder` | Card outer border |
+| `titleText` | Title text |
+| `descriptionText` | Description text |
+| `ctaBackground` | CTA button fill; `.clear` leaves a border-only button |
+| `ctaBorder` | CTA button border |
+| `ctaText` | CTA button label |
+
+The brand name (always the card's primary text color, white on photos), the Ad badge, the scrim and everything drawn on photos are locked.
 
 ### Custom Typography
 
+`AdTypography` takes a separate `AdTextStyle` — an `AdFontFamily` (Inter `.regular`, `.medium` or `.semiBold`, bundled with the SDK) and a text size in points — for the title, the description and the CTA label. An omitted role, or an omitted field, keeps the Velocity default.
+
 ```swift
 let config = AdViewConfiguration(
-    typography: AdTypography.Builder(selectedSize: .M)
-        .title { $0.copy(fontSize: 18, fontWeight: .bold) }
-        .description { $0.copy(fontSize: 14) }
-        .ctaButton { $0.copy(fontWeight: .semibold) }
-        .build()
+    adTypography: AdTypography(
+        title: AdTextStyle(fontFamily: .semiBold, textSize: 16),
+        description: AdTextStyle(textSize: 13),
+        cta: AdTextStyle(fontFamily: .medium, textSize: 15)
+    )
 )
 ```
 
-#### Available Typography Tokens
-
-| Token | Description |
-|-------|-------------|
-| `brandName` | Advertiser brand name |
-| `sponsoredLabel` | "Sponsored" label |
-| `sponsoredBadgeText` | "ad" badge label |
-| `title` | Ad title |
-| `description` | Ad body text |
-| `ctaButton` | CTA button text |
-
 ### Dark Theme Override
 
-By default the SDK follows the system dark mode setting. Override it explicitly:
+By default the SDK follows the host's `userInterfaceStyle`. Override it explicitly:
 
 ```swift
 let config = AdViewConfiguration(
@@ -1124,6 +1099,16 @@ let config = AdViewConfiguration(
 )
 ```
 
+### Corner Radius
+
+```swift
+let config = AdViewConfiguration(
+    cornerRadius: 12   // 0 … AdViewConfiguration.maxCornerRadius (24); nil = Velocity default
+)
+```
+
+A radius outside 0–24 is ignored with a warning.
+
 ### Combining All Options
 
 ```swift
@@ -1131,13 +1116,15 @@ let config = AdViewConfiguration(
     colorScheme: AdColorScheme.Builder()
         .light { $0.copy(ctaBackground: UIColor(red: 0.38, green: 0.0, blue: 0.93, alpha: 1.0)) }
         .build(),
-    typography: AdTypography.Builder(selectedSize: .M)
-        .title { $0.copy(fontSize: 18) }
-        .build(),
-    darkTheme: nil
+    adTypography: AdTypography(
+        title: AdTextStyle(fontFamily: .semiBold, textSize: 16),
+        description: AdTextStyle(textSize: 13)
+    ),
+    darkTheme: nil,
+    cornerRadius: 12
 )
 
-let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adViewSize: .M)
+let adRequest = VelocityNativeAdViewRequest.Builder(adUnitId: "ad_unit_123", adViewHeights: [.height120, .height254])
     .withPrompt("Best running shoes")
     .withAdViewConfiguration(config)
     .build()
@@ -1365,7 +1352,7 @@ A banner instance is **single-use**: exactly one `load(bannerView:delegate:)` ca
 
 ### Banner Sizes
 
-Every request carries a `VelocityBannerAdSize` that determines the creative dimensions requested from the server:
+Every request carries a `VelocityBannerAdSize` that determines the size of the ad that is served:
 
 | Size | Dimensions | Use |
 |------|-----------|-----|
@@ -1521,16 +1508,16 @@ SwiftUI calls `updateUIView` whenever the proposed size changes, so rotation is 
 
 ### Impression Semantics
 
-`onAdImpression` fires when the banner records an **MRC-compliant viewability impression**: at least 50 % of the banner view's area visible on screen for at least 1 *contiguous* second. Dwell time resets whenever visibility is interrupted — the view is scrolled off, occluded, hidden, or the app is backgrounded — so brief flashes of visibility never count. The impression fires **at most once per instance**.
+`onAdImpression` fires when the banner records a **viewability impression**: as soon as at least 50 % of the banner view's area is visible on screen. A banner that is hidden, fully transparent, outside the window, not yet in a window, or shown while the app is not active (in the background, or behind the app switcher, Control Center, Notification Center or a system alert) does not count. The impression fires **at most once per instance**.
 
 `onAdImpression` is where the impression is billed; align your own impression analytics with this callback rather than with `onAdLoaded`.
 
 ### Rotation and Resizing
 
-- **UIKit:** nothing to do — the banner view observes its own `layoutSubviews` and forwards size changes to the player automatically.
+- **UIKit:** nothing to do — the banner view observes its own `layoutSubviews` and applies size changes automatically.
 - **SwiftUI:** call `handleContainerSizeChange(_:)` from `updateUIView(_:context:)` as shown above. SwiftUI does not trigger a UIKit layout pass for every frame-modifier change, so the explicit forward keeps the creative's viewport in sync.
 
-The rendered creative always fills the banner view's current bounds; the requested `VelocityBannerAdSize` determines which creative the server selects, not a hard runtime constraint on the view's size.
+The rendered creative always fills the banner view's current bounds; the requested `VelocityBannerAdSize` determines which ad size is served, not a runtime constraint on the view's size.
 
 ### Cleanup
 
@@ -1542,7 +1529,7 @@ deinit {
 }
 ```
 
-`destroy()` cancels any in-flight load, tears down the player, removes the rendered content from the banner view, and silences all further callbacks. It is idempotent and safe to call from any thread. The `VelocityBannerAdView` itself remains yours — remove it from your hierarchy or reuse it with a **new** `VelocityBannerAd` instance.
+`destroy()` cancels any in-flight load, removes the rendered content from the banner view, and silences all further callbacks. It is idempotent and safe to call from any thread. The `VelocityBannerAdView` itself remains yours — remove it from your hierarchy or reuse it with a **new** `VelocityBannerAd` instance.
 
 ---
 
@@ -1759,6 +1746,24 @@ Call `destroy()` on every ad instance — native, interstitial, rewarded, or ban
 
 **Solution:** Handle `onAdFailedToLoad` gracefully (e.g. hide ad space or show fallback). The SDK continues to function even when no ads are available. This applies to every ad format.
 
+A native load that fails with `VelocityAdsErrorCode.missingImpressionTracker` (`2014`) means the ad cannot be tracked and is not served. Treat it like no fill.
+
+#### 5. SDK-Rendered Native Ad View Is Empty or 0 pt High
+
+**Problem:** The ad loaded (`onAdLoaded` fired) but the `VelocityNativeAdView` shows nothing and reports a height of 0.
+
+**Cause:** The loaded ad could not be rendered. The view collapses to 0 pt and stays empty; nothing is reported to the delegate. Hosting rows follow the collapse, so no gap is left.
+
+**Solution:** Nothing is required — the slot disappears. Configuring another ad (or the same ad again) into the view via `configureAdView(_:)` restores normal sizing. If the view is 120 pt or 254 pt but blank, the ad has not been rendered yet; the placeholder is drawn until it is.
+
+#### 6. SDK-Rendered Native Ad View Has the Wrong Height
+
+**Problem:** The card is cut off or letterboxed, or an ad that cannot be rendered leaves an empty gap instead of collapsing.
+
+**Cause:** A height constraint, `.frame(height:)`, `minSize` or a row-height derived from `adViewHeights` pins the view. The request lists the heights the placement *allows*; the view takes one of them when it is created or configured, and collapses to 0 if the ad cannot be rendered. A pinned height that differs from the view's clips or letterboxes the card, and any pinned height hides the collapse.
+
+**Solution:** Pin the view's edges only and use self-sizing rows. In SwiftUI, host the ad with `createAdSwiftUIView()` rather than a hand-written `UIViewRepresentable` (see [The view owns its height](#the-view-owns-its-height)).
+
 ---
 
 ## Best Practices
@@ -1829,6 +1834,57 @@ func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError) {
 
 ---
 
+## Migrating to 0.12.0 (Native Ads)
+
+0.12.0 replaces the native-ad stack. SDK-rendered native ads come in two card heights — 120 pt and 254 pt — with image carousels, inline video and RTL layouts built in. Update your code as follows.
+
+### API mapping
+
+| Before (0.11.x) | 0.12.0 |
+|---|---|
+| `VelocityNativeAdViewRequest.Builder(adUnitId:, adViewSize: .M)` | `VelocityNativeAdViewRequest.Builder(adUnitId:, adViewHeights: [.height120])` — `adViewHeights` is optional; omitted = every height |
+| `VelocityNativeAdViewSize` (`.XS` / `.S` / `.M` / `.L`), `.heightPt` | `VelocityNativeAdViewHeight` (`.height120`, `.height254`), `.height` |
+| `request.adViewSize` | `request.adViewHeights` |
+| Height constraints, `.frame(height:)`, `minSize` or row heights from `adViewSize.heightPt`, `largeExpandedHeightPt`, `largeCollapsedHeightPt` | Remove them — the view owns its height (including the collapse to 0); pin edges only (see [The view owns its height](#the-view-owns-its-height)) |
+| `nativeAd.collapse()`, `adView.collapse()`, `nativeAd.onCollapseStateChanged`, `adView.onCollapseStateChanged` | Removed — no replacement |
+| `data.getLargeImageUrl(width:height:)`, `data.largeImageUrl`, `data.squareImageUrl` | `data.imagesByAspectRatio` (every image, keyed by aspect-ratio string) / `data.images(for: "1.9:1")` (landscape images) / `data.images(for: "1:1")` (square images) |
+| `data.sponsoredLabel` | Removed — no replacement |
+| `data.title`, `description`, `callToAction`, `advertiserName`, `badgeLabel`, `advertiserIconUrl` (`String`) | `String?` — render each only when present |
+| `NativeAd(...)` with non-optional creative fields (tests, mocks) | Every creative field (`title`, `description`, `callToAction`, `advertiserName`, `badgeLabel`, `advertiserIconUrl`) is `String?` with a `nil` default; `imagesByAspectRatio` replaces the image URL parameters |
+| `AdColors` (13 non-optional tokens) | 8 optional tokens: `cardBackground`, `cardBackgroundPressed`, `cardBorder`, `titleText`, `descriptionText`, `ctaBackground` (`.clear` → border-only CTA), `ctaBorder`, `ctaText`. `nil` = Velocity default |
+| `AdColors.light` / `AdColors.dark` (SDK default palettes), `AdColorScheme(light: .light, dark: .dark)`, `AdColorScheme.Builder()` seeded from them | Removed — `AdColors()` / `AdColorScheme()` start with every token `nil` (the Velocity default); build `AdColors(...)` with only the tokens you want to pin. `AdColorScheme.Builder().light { $0.copy(...) }` / `.dark { ... }` keep working |
+| `AdColors.brandText`, `brandIconBorder` | Removed — locked by design; no replacement |
+| `AdColors.sponsoredLabelText`, `sponsoredBadgeBackground`, `sponsoredBadgeText`, `chevronIconTint` | Removed — no replacement |
+| `AdTypography.Builder(selectedSize:)` with `brandName` / `sponsoredLabel` / `sponsoredBadgeText` / `title` / `description` / `ctaButton` blocks, `FontStyle(fontSize:fontWeight:)` | `AdTypography(title:, description:, cta:)` — each an `AdTextStyle(fontFamily:, textSize:)` with `AdFontFamily` `.regular`, `.medium` or `.semiBold`; `FontStyle` and `UIFont.Weight` are gone; colors live in `AdColors` |
+| `AdViewConfiguration.typography` / `AdViewConfiguration(typography:)` | Renamed to `adTypography` — `AdViewConfiguration(adTypography:)`, `config.adTypography`. The value type changed too (see the `AdTypography` row above) |
+| `AdViewConfiguration.create(size:)` | Removed — use `AdViewConfiguration()` (or `AdViewConfiguration(colorScheme:adTypography:darkTheme:cornerRadius:)`); there is no per-size default any more |
+| Hand-written `UIViewRepresentable` around `createAdView()` with a fixed frame | Prefer `createAdSwiftUIView()`; a representable can follow the height only via `sizeThatFits` on iOS 16+ |
+| — | `AdViewConfiguration.cornerRadius` (0–24 pt; `nil` = Velocity default) |
+| — | `VelocityAdsErrorCode.missingImpressionTracker` (`2014`) |
+
+### Choosing a height
+
+The four 0.11.x sizes collapse into two heights. Suggested mapping:
+
+| Before (0.11.x) | Move to (0.12.0) |
+|---|---|
+| `.XS`, `.S` or `.M` | `.height120` (120 pt) |
+| `.L` | `.height254` (254 pt) |
+
+Pass only the height you migrated to in the request. Omit the heights to allow every height.
+
+### Behavior changes
+
+- **The view owns its height.** When it is created or configured, the view takes one of the heights the request allows and, in normal operation, keeps it; it collapses to 0 if the ad cannot be rendered. Do not pin a height around it. `UITableView` / `UICollectionView` rows hosting it are re-measured automatically when its height changes (e.g. the collapse).
+- **Placeholder.** From creation (or `configureAdView`) until the ad is rendered, the view draws a card background and media frame at the card's size, following Light/Dark mode, the configured corner radius and `cardBackground` — the slot is never a transparent gap.
+- **Video.** Video ads loop or stop on their poster with a Replay button, depending on the ad. A video whose media cannot be played shows its poster. Playback is not reported to the delegate, and video is never exposed through `NativeAd`.
+- **Images.** `imagesByAspectRatio` keeps every aspect ratio included with the ad, including ratios the SDK-rendered card does not use — read any of them with `images(for: "<ratio>")`.
+- **Load failures.** An ad that cannot be tracked fails `onAdFailedToLoad` with code `2014` (`missingImpressionTracker`). Treat it like no fill.
+- **Render failures.** If an ad that already loaded cannot be rendered, the view collapses to 0 pt and stays empty; nothing is reported to the delegate. Configuring another ad into the view restores normal sizing.
+- **Configuration.** Invalid values (radius outside 0–24 or a non-positive text size) are ignored with a warning log and the default is kept. Dynamic Type is not applied to the configured text size.
+
+---
+
 ## API Reference
 
 ### VelocityAds
@@ -1861,7 +1917,7 @@ VelocityAds.initSDK(request, delegate: MyInitDelegate())
 VelocityAds.setPresenterProvider(_ provider: (() -> UIViewController?)?)
 ```
 
-Supplies a `UIViewController` root that the SDK uses to present in-app StoreKit sheets (`SKStoreProductViewController`) when a user taps an ad.
+Supplies a `UIViewController` root that the SDK uses to present store destinations when a user taps an ad.
 
 **Most apps do not need to call this method.** The SDK automatically discovers the correct presenter by scanning the active `UIWindowScene` and walking the `presentedViewController` chain. Call this only when auto-discovery produces the wrong result:
 
@@ -1907,34 +1963,31 @@ nativeAd.load(delegate: VelocityNativeAdDelegate)
 - `aiResponse` - AI-generated response content (optional, but recommended for targeting)
 - `conversationHistory` - Conversation history for ad targeting — array of `["role": "user"/"assistant", "content": "..."]` dictionaries (optional)
 - `additionalContext` - Extra context string to improve ad relevance (optional)
-- `adUnitId` - Ad unit identifier (required)
-- `includePreliminaryText` - When `true`, requests the server to generate a short contextual snippet ("preliminary text") that could be displayed above the ad creative. Defaults to `false`. (optional)
+- `includePreliminaryText` - When `true`, requests a short contextual snippet ("preliminary text") that could be displayed above the ad creative. Defaults to `false`. (optional)
 
 **`VelocityNativeAd` properties (available after `onAdLoaded`):**
 
-Ad creative data is accessed via `nativeAd.data` (type `NativeAd?`, non-nil after a successful load):
+Ad creative data is accessed via `nativeAd.data` (type `NativeAd?`, non-nil after a successful load). Every creative field is optional; only `adId`, `clickUrl` and `impressionUrl` are always present:
 
 - `nativeAd.data?.adId` (`String`) - Unique ad identifier
-- `nativeAd.data?.title` (`String`) - Ad title/headline
-- `nativeAd.data?.description` (`String`) - Ad body text
-- `nativeAd.data?.callToAction` (`String`) - CTA button text (e.g., "Learn More")
-- `nativeAd.data?.advertiserName` (`String`) - Advertiser/brand name
-- `nativeAd.data?.sponsoredLabel` (`String`) - Sponsorship label (e.g., "Sponsored")
-- `nativeAd.data?.badgeLabel` (`String`) - Badge text (e.g., "ad")
-- `nativeAd.data?.advertiserIconUrl` (`String`) - Advertiser logo/icon URL
-- `nativeAd.data?.largeImageUrl` (`String?`) - Landscape hero image URL (optional). Resolved at the default 1920×640 size. For manual rendering at a specific size, call `nativeAd.data?.getLargeImageUrl(width:height:)` to obtain a URL sized to your image view's pixel dimensions.
-- `nativeAd.data?.getLargeImageUrl(width:height:)` (`String?`) - Returns the landscape hero image URL with dimension placeholders substituted for the supplied pixel values. Use this when manually rendering the image at a known size (e.g. after a `UIImageView` has been laid out) to request a Cloudinary-optimised resolution. When `width` or `height` is ≤ 0 the default 1920×640 dimensions are used.
-- `nativeAd.data?.squareImageUrl` (`String?`) - Square (1:1) image URL (optional)
-- `nativeAd.data?.clickUrl` (`String`) - Destination URL when ad is clicked
-- `nativeAd.data?.impressionUrl` (`String`) - URL to track ad impressions
-- `nativeAd.data?.preliminaryText` (`String?`) - Short server-generated contextual text intended to be displayed between the AI response and the ad creative. (optional)
+- `nativeAd.data?.title` (`String?`) - Ad headline
+- `nativeAd.data?.description` (`String?`) - Ad body text
+- `nativeAd.data?.callToAction` (`String?`) - CTA button text (e.g., "Learn More")
+- `nativeAd.data?.advertiserName` (`String?`) - Advertiser/brand name
+- `nativeAd.data?.badgeLabel` (`String?`) - Short badge label (e.g., "Ad")
+- `nativeAd.data?.advertiserIconUrl` (`String?`) - Brand logo URL
+- `nativeAd.data?.imagesByAspectRatio` (`[String: [String]]`) - Every image included with the ad, keyed by its aspect-ratio string (today `"1:1"` and `"1.9:1"`; other ratios may appear)
+- `nativeAd.data?.images(for:)` (`[String]`) - The images for an aspect-ratio string (for example `images(for: "1.9:1")`); an empty array when absent. See [Image aspect ratios](#image-aspect-ratios)
+- `nativeAd.data?.clickUrl` (`String`) - Destination URL when ad is clicked (opened by the SDK for registered views — do not open it yourself). May be empty when the ad leads to a store page — the SDK handles it; never open it yourself
+- `nativeAd.data?.impressionUrl` (`String`) - URL to track ad impressions (fired by the SDK for registered views)
+- `nativeAd.data?.preliminaryText` (`String?`) - Short contextual text intended to be displayed between the AI response and the ad creative. (optional)
 
 #### `VelocityNativeAdViewRequest`
 
-Extends `VelocityNativeAdRequest` with size and theming for SDK-rendered ad views. Required to use `createAdView()` and `createAdSwiftUIView()`. Both `adUnitId` and `adViewSize` are required; the size is sent to the server at load time so it can select the correct template.
+Extends `VelocityNativeAdRequest` with the allowed card heights and theming for SDK-rendered ad views. Required to use `createAdView()` and `createAdSwiftUIView()`. Only `adUnitId` is required; `adViewHeights` omitted or empty allows every height this SDK supports.
 
 ```swift
-VelocityNativeAdViewRequest.Builder(adUnitId: String, adViewSize: VelocityNativeAdViewSize)
+VelocityNativeAdViewRequest.Builder(adUnitId: String, adViewHeights: [VelocityNativeAdViewHeight] = [])
     .withPrompt(_ prompt: String?)                           // Optional: Provide for context
     .withAIResponse(_ aiResponse: String?)                   // Optional: Provide for better targeting
     .withConversationHistory(_ history: [[String: Any]]?)    // Optional: Previous conversation
@@ -1942,20 +1995,22 @@ VelocityNativeAdViewRequest.Builder(adUnitId: String, adViewSize: VelocityNative
     .includePreliminaryText(_ include: Bool)                 // Optional: Request preliminary text
     .withAdViewConfiguration(_ config: AdViewConfiguration)  // Optional: See Ad Theming
     .build() -> VelocityNativeAdViewRequest
+
+request.adViewHeights   // [VelocityNativeAdViewHeight] — the heights this request allows
+request.configuration   // AdViewConfiguration — AdViewConfiguration() when not set
 ```
 
 #### `VelocityNativeAd` — View Lifecycle Methods
 
 ```swift
-// Create SDK-rendered views (requires VelocityNativeAdViewRequest and a successful load)
+// Create SDK-rendered views (requires VelocityNativeAdViewRequest and a successful load).
+// The returned view owns its height: one of the allowed heights, or 0 if the ad cannot be rendered.
 @MainActor nativeAd.createAdView() -> VelocityNativeAdView?
 @MainActor nativeAd.createAdSwiftUIView() -> AnyView?
 
-// Reconfigure an existing SDK-rendered view for cell recycling
-@MainActor nativeAd.configureAdView(_ adView: VelocityNativeAdView)
-
-// Collapse the Large ad card to compact height (no-op for Small/Medium)
-@MainActor nativeAd.collapse()
+// Reconfigure an existing SDK-rendered view for cell recycling.
+// Returns false if the ad is not loaded, destroyed, not a view request, or called off the main thread.
+@discardableResult @MainActor nativeAd.configureAdView(_ adView: VelocityNativeAdView) -> Bool
 
 // Manual rendering interaction tracking
 @MainActor nativeAd.registerViewForInteraction(adView: UIView, clickableViews: [UIView])
@@ -1965,7 +2020,7 @@ VelocityNativeAdViewRequest.Builder(adUnitId: String, adViewSize: VelocityNative
 @MainActor nativeAd.destroy()
 ```
 
-> **Note:** `createAdView()`, `createAdSwiftUIView()`, `configureAdView(_:)`, `collapse()`, `registerViewForInteraction(adView:clickableViews:)`, `unregisterViewForInteraction()`, and `destroy()` are annotated `@MainActor`. Calling them from a delegate callback is safe (delegate callbacks are already delivered on the main thread). From a non-isolated context, wrap the call in `DispatchQueue.main.async { }` or `await MainActor.run { }`.
+> **Note:** `createAdView()`, `createAdSwiftUIView()`, `configureAdView(_:)`, `registerViewForInteraction(adView:clickableViews:)`, `unregisterViewForInteraction()`, and `destroy()` are annotated `@MainActor`. Calling them from a delegate callback is safe (delegate callbacks are already delivered on the main thread). From a non-isolated context, wrap the call in `DispatchQueue.main.async { }` or `await MainActor.run { }`.
 
 #### `VelocityNativeAd` — Interaction Tracking
 
@@ -1977,19 +2032,13 @@ VelocityNativeAdViewRequest.Builder(adUnitId: String, adViewSize: VelocityNative
 
 > **Note:** `registerViewForInteraction(adView:clickableViews:)` and `unregisterViewForInteraction()` are annotated `@MainActor`. Calling them from a delegate callback is safe (delegate callbacks are already delivered on the main thread). From a non-isolated context, wrap the call in `DispatchQueue.main.async { }` or `await MainActor.run { }`.
 
-#### `VelocityNativeAdView.collapse()`
+#### `VelocityNativeAdView`
 
 ```swift
-func collapse()
+public final class VelocityNativeAdView: UIView
 ```
 
-Collapses this ad view to a compact preview state with animation, revealing a "See more" bar at the bottom. The user can tap "See more" to restore the full ad.
-
-Only valid for Large (`L`) ad views. Calling this on a Small or Medium view logs a warning and does nothing. If the view is already collapsed, the call is ignored.
-
-Must be called on the main thread. If called from a background thread, the collapse is dispatched asynchronously to the main thread.
-
-Equivalent to calling `VelocityNativeAd.collapse()` on the ad instance — use whichever reference is more convenient.
+The host of an SDK-rendered card, returned by `createAdView()`. Publishers never instantiate it. It owns its height (`intrinsicContentSize` / `sizeThatFits`): one of the heights the request allows, taken when the view is created or configured and unchanged in normal operation; 0 pt if the bound ad cannot be rendered. Pin its edges, not its height. A hosting `UITableView` / `UICollectionView` row is re-measured automatically when the height changes (e.g. the collapse). Width follows the superview. The rendered height and media are not exposed.
 
 ### Models
 
@@ -1999,52 +2048,76 @@ Accessed via `VelocityNativeAd.data` after a successful load with `VelocityNativ
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `adId` | `String` | Unique ad load identifier |
-| `title` | `String` | Ad headline |
-| `description` | `String` | Ad body text |
-| `callToAction` | `String` | CTA button text (e.g. "Learn More") |
-| `advertiserName` | `String` | Advertiser/brand name |
-| `sponsoredLabel` | `String` | Sponsorship label (e.g. "Sponsored") |
-| `badgeLabel` | `String` | Badge text (e.g. "ad") |
-| `advertiserIconUrl` | `String` | Advertiser logo/icon URL |
-| `largeImageUrl` | `String?` | Main (landscape) ad image URL resolved at the default 1920×640 size (optional). Use `getLargeImageUrl(width:height:)` to request a size-optimised URL for your image view. |
-| `squareImageUrl` | `String?` | Square ad image URL (optional) |
-| `clickUrl` | `String` | URL opened on ad click |
-| `impressionUrl` | `String` | Impression tracking URL |
-| `preliminaryText` | `String?` | Short server-generated contextual text to display above the ad (optional — requires `includePreliminaryText(true)` on the request) |
+| `adId` | `String` | Ad identifier used for impression/click tracking |
+| `title` | `String?` | Ad headline |
+| `description` | `String?` | Ad body text |
+| `callToAction` | `String?` | CTA button text (e.g. "Learn More") |
+| `advertiserName` | `String?` | Advertiser/brand name |
+| `badgeLabel` | `String?` | Badge text (e.g. "Ad") |
+| `advertiserIconUrl` | `String?` | Advertiser logo/icon URL |
+| `imagesByAspectRatio` | `[String: [String]]` | Every image included with the ad, keyed by its aspect-ratio string (today `"1:1"` and `"1.9:1"`; other ratios may appear) |
+| `images(for:)` | `[String]` | The images for an aspect-ratio string (for example `images(for: "1.9:1")`); an empty array when absent. See [Image aspect ratios](#image-aspect-ratios) |
+| `clickUrl` | `String` | URL opened on ad click (by the SDK, for registered views — do not open it yourself). Always present but may be empty when the ad leads to a store page — the SDK handles it; never open it yourself |
+| `impressionUrl` | `String` | Impression tracking URL (fired by the SDK, for registered views) |
+| `preliminaryText` | `String?` | Short contextual text to display above the ad (optional — requires `includePreliminaryText(true)` on the request) |
 
-#### `VelocityNativeAdViewSize`
+Every creative field except `adId`, `clickUrl` and `impressionUrl` may be missing — render each only when present. Video is never exposed here: a video ad renders through the SDK-rendered view only.
+
+#### `VelocityNativeAdViewHeight`
 
 ```swift
-public enum VelocityNativeAdViewSize {
-    case S  // Small — 50pt height
-    case M  // Medium — 158pt height
-    case L  // Large — 280pt height
+public enum VelocityNativeAdViewHeight: String, CaseIterable {
+    case height120 = "HEIGHT_120"   // 120 pt
+    case height254 = "HEIGHT_254"   // 254 pt
+
+    public var height: CGFloat       // 120 / 254
+    public var wireValue: String     // "HEIGHT_120" / "HEIGHT_254"
+
+    public static func normalize(_ requested: [VelocityNativeAdViewHeight]?) -> [VelocityNativeAdViewHeight]
+    public static func fromWireValue(_ value: String?) -> VelocityNativeAdViewHeight?
+    public static func fromHeight(_ height: CGFloat) -> VelocityNativeAdViewHeight?
 }
 ```
 
-Use `VelocityNativeAdViewSize.largeExpandedHeightPt` and `VelocityNativeAdViewSize.largeCollapsedHeightPt` to size external containers around a collapsible Large ad without hard-coding numbers:
+| Value | Height |
+|-------|--------|
+| `.height120` | 120 pt |
+| `.height254` | 254 pt |
 
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `largeExpandedHeightPt` | 280 pt | Height of a Large ad card in its full expanded state |
-| `largeCollapsedHeightPt` | 158 pt | Height of a Large ad card in its collapsed preview state |
+`normalize` turns an omitted or empty array into every supported height and removes duplicates. `fromWireValue` / `fromHeight` return `nil` for a value this SDK version does not define — unknown heights are never mapped to a default.
+
+#### Image aspect ratios
+
+`NativeAd` images are keyed by their aspect-ratio string. Today an ad can include:
+
+| Key | Images |
+|-----|--------|
+| `"1:1"` | Square images |
+| `"1.9:1"` | Landscape images |
+
+Other ratios may be added in future and are read the same way: iterate `data.imagesByAspectRatio`, or call `data.images(for: "<ratio>")` — for example `data.images(for: "1.9:1").first`. `images(for:)` returns an empty array when the ad has no images for that ratio.
 
 #### `AdViewConfiguration`
 
 ```swift
 public struct AdViewConfiguration {
-    public var colorScheme: AdColorScheme?   // nil = SDK default
-    public var typography: AdTypography?     // nil = SDK default
-    public var darkTheme: Bool?              // nil = follow system
+    public static let maxCornerRadius: CGFloat = 24
+
+    public var colorScheme: AdColorScheme?   // nil = Velocity default colors
+    public var adTypography: AdTypography?   // nil = Velocity typography
+    public var darkTheme: Bool?              // nil = follow the host's userInterfaceStyle
+    public var cornerRadius: CGFloat?        // 0 … 24 pt; nil = Velocity default
 
     public init(
         colorScheme: AdColorScheme? = nil,
-        typography: AdTypography? = nil,
-        darkTheme: Bool? = nil
+        adTypography: AdTypography? = nil,
+        darkTheme: Bool? = nil,
+        cornerRadius: CGFloat? = nil
     )
 }
 ```
+
+A radius outside 0–24 is ignored with a warning log; the default stays.
 
 #### `AdColorScheme`
 
@@ -2053,7 +2126,8 @@ public struct AdColorScheme {
     public let light: AdColors
     public let dark: AdColors
 
-    public init(light: AdColors = .light, dark: AdColors = .dark)
+    // An omitted palette is AdColors() — every token at the Velocity default.
+    public init(light: AdColors = AdColors(), dark: AdColors = AdColors())
 
     public final class Builder {
         public init(base: AdColorScheme = AdColorScheme())
@@ -2073,71 +2147,81 @@ public struct AdColorScheme {
 
 #### `AdColors`
 
-```swift
-public struct AdColors {
-    public let cardBackground: UIColor
-    public let sponsoredLabelText: UIColor
-    public let titleText: UIColor
-    public let descriptionText: UIColor
-    public let brandText: UIColor
-    public let sponsoredBadgeBackground: UIColor
-    public let sponsoredBadgeText: UIColor
-    public let ctaBackground: UIColor
-    public let ctaText: UIColor
-    public let ctaBorder: UIColor
-    public let chevronIconTint: UIColor
-    public let brandIconBorder: UIColor
-    public let cardBorder: UIColor
+The eight color tokens of the card for one appearance. Every token is optional: `nil` keeps the Velocity default. `AdColors()` keeps every default.
 
-    // Returns a copy with only the specified tokens replaced:
-    public func copy(
+```swift
+public struct AdColors: Equatable {
+    public let cardBackground: UIColor?
+    public let cardBackgroundPressed: UIColor?
+    public let cardBorder: UIColor?
+    public let titleText: UIColor?
+    public let descriptionText: UIColor?
+    public let ctaBackground: UIColor?   // .clear = border-only CTA
+    public let ctaBorder: UIColor?
+    public let ctaText: UIColor?
+
+    // Every parameter defaults to nil — the Velocity default.
+    public init(
         cardBackground: UIColor? = nil,
-        sponsoredLabelText: UIColor? = nil,
+        cardBackgroundPressed: UIColor? = nil,
+        cardBorder: UIColor? = nil,
         titleText: UIColor? = nil,
         descriptionText: UIColor? = nil,
-        brandText: UIColor? = nil,
-        sponsoredBadgeBackground: UIColor? = nil,
-        sponsoredBadgeText: UIColor? = nil,
         ctaBackground: UIColor? = nil,
-        ctaText: UIColor? = nil,
         ctaBorder: UIColor? = nil,
-        chevronIconTint: UIColor? = nil,
-        brandIconBorder: UIColor? = nil,
-        cardBorder: UIColor? = nil
-    ) -> AdColors
+        ctaText: UIColor? = nil
+    )
 
-    public static let light: AdColors  // SDK default light palette
-    public static let dark: AdColors   // SDK default dark palette
+    // Returns a copy with only the specified tokens replaced (nil = keep):
+    public func copy(
+        cardBackground: UIColor? = nil,
+        cardBackgroundPressed: UIColor? = nil,
+        cardBorder: UIColor? = nil,
+        titleText: UIColor? = nil,
+        descriptionText: UIColor? = nil,
+        ctaBackground: UIColor? = nil,
+        ctaBorder: UIColor? = nil,
+        ctaText: UIColor? = nil
+    ) -> AdColors
 }
 ```
 
 #### `AdTypography`
 
+A separate font family and text size for the title, the description and the CTA label. An omitted role keeps the Velocity default. The brand name and the Ad badge always keep Velocity's typography.
+
 ```swift
-public struct AdTypography {
-    public final class Builder {
-        // Seeds from SDK defaults for the given size:
-        public init(selectedSize: VelocityNativeAdViewSize)
+public struct AdTypography: Equatable {
+    public let title: AdTextStyle?
+    public let description: AdTextStyle?
+    public let cta: AdTextStyle?
 
-        // Each block receives the current default FontStyle, return a modified copy:
-        @discardableResult public func brandName(_ block: (FontStyle) -> FontStyle) -> Builder
-        @discardableResult public func sponsoredLabel(_ block: (FontStyle) -> FontStyle) -> Builder
-        @discardableResult public func sponsoredBadgeText(_ block: (FontStyle) -> FontStyle) -> Builder
-        @discardableResult public func title(_ block: (FontStyle) -> FontStyle) -> Builder
-        @discardableResult public func description(_ block: (FontStyle) -> FontStyle) -> Builder
-        @discardableResult public func ctaButton(_ block: (FontStyle) -> FontStyle) -> Builder
-
-        public func build() -> AdTypography
-    }
+    public init(title: AdTextStyle? = nil, description: AdTextStyle? = nil, cta: AdTextStyle? = nil)
 }
+```
 
-public struct FontStyle {
-    public let fontSize: CGFloat
-    public let fontWeight: UIFont.Weight
+#### `AdTextStyle`
 
-    public init(fontSize: CGFloat, fontWeight: UIFont.Weight = .regular)
+The font family and text size of one text role.
 
-    public func copy(fontSize: CGFloat? = nil, fontWeight: UIFont.Weight? = nil) -> FontStyle
+```swift
+public struct AdTextStyle: Equatable {
+    public let fontFamily: AdFontFamily?   // nil = the role's Velocity default family
+    public let textSize: CGFloat?          // points; nil = Velocity default. Dynamic Type is not applied
+
+    public init(fontFamily: AdFontFamily? = nil, textSize: CGFloat? = nil)
+}
+```
+
+A non-finite or non-positive size is ignored with a warning log and the Velocity default stays. Text never grows the card — the title clamps to one line, the description to two.
+
+#### `AdFontFamily`
+
+```swift
+public enum AdFontFamily: String, CaseIterable {
+    case regular    // Inter Regular (weight 400)
+    case medium     // Inter Medium (weight 500)
+    case semiBold   // Inter SemiBold (weight 600)
 }
 ```
 
@@ -2191,6 +2275,7 @@ public enum VelocityAdsErrorCode {
     public static let adDestroyed: Int                 // 2010
     public static let invalidAdUnitId: Int             // 2011
     public static let adSpent: Int                     // 2012
+    public static let missingImpressionTracker: Int    // 2014
 }
 ```
 
@@ -2222,6 +2307,7 @@ Error code behavior:
   - `VelocityAdsErrorCode.adDestroyed` (`2010`) — `load` called on a destroyed instance. Create a new `VelocityNativeAd` for a new ad placement.
   - `VelocityAdsErrorCode.invalidAdUnitId` (`2011`) — `adUnitId` is empty or blank
   - `VelocityAdsErrorCode.adSpent` (`2012`) — `show` called on a fullscreen ad instance that was already shown. Load a new instance.
+  - `VelocityAdsErrorCode.missingImpressionTracker` (`2014`) — Native only: the ad cannot be tracked and is not served. Treat it like no fill.
 
 ### Delegates
 
@@ -2239,20 +2325,25 @@ protocol VelocityAdsInitDelegate: AnyObject {
 Single unified delegate for all ad loading paths (data-only and SDK-rendered views).
 
 ```swift
+@MainActor
 protocol VelocityNativeAdDelegate: AnyObject {
-    func onAdLoaded(nativeAd: VelocityNativeAd)
-    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError)
-    func onAdImpression(nativeAd: VelocityNativeAd)
-    func onAdClicked(nativeAd: VelocityNativeAd)
+    func onAdLoaded(nativeAd: VelocityNativeAd)                                  // required
+    func onAdFailedToLoad(nativeAd: VelocityNativeAd, error: VelocityAdsError)   // required
+    func onAdImpression(nativeAd: VelocityNativeAd)                              // optional (default no-op)
+    func onAdClicked(nativeAd: VelocityNativeAd)                                 // optional (default no-op)
 }
 ```
 
-| Method | Description |
-|--------|-------------|
-| `onAdLoaded` | Main thread. Ad data is loaded. Call `createAdView()` or `createAdSwiftUIView()` for SDK-rendered views, or read `nativeAd.data` for manual rendering. |
-| `onAdFailedToLoad` | Main thread. Ad failed to load. |
-| `onAdImpression` | Fires once when ≥ 50 % of the ad view is visible on screen. Default implementation is a no-op. |
-| `onAdClicked` | User tapped the ad (SDK handles opening the click URL). Default implementation is a no-op. |
+All methods are delivered on the **main thread**. The protocol is `@MainActor`-annotated. Exactly one of `onAdLoaded` / `onAdFailedToLoad` fires per `load(delegate:)` call.
+
+| Method | Required | Description |
+|--------|----------|-------------|
+| `onAdLoaded` | ✅ | Ad data is loaded. Call `createAdView()` or `createAdSwiftUIView()` for SDK-rendered views, or read `nativeAd.data` for manual rendering. |
+| `onAdFailedToLoad` | ✅ | Ad failed to load. `error.code` identifies the reason; the original request remains readable via `nativeAd.adRequest`. |
+| `onAdImpression` | Optional | Fires once when ≥ 50 % of the ad view is visible on screen. Default implementation is a no-op. |
+| `onAdClicked` | Optional | User tapped the ad (SDK handles opening the click URL). Default implementation is a no-op. |
+
+Video playback inside an SDK-rendered card is not reported to the delegate.
 
 #### `VelocityInterstitialAdDelegate`
 
@@ -2429,7 +2520,7 @@ All callbacks are delivered on the **main thread**. The protocol is `@MainActor`
 |--------|----------|-------------|
 | `onAdLoaded` | ✅ | Ad loaded and rendering in the banner view. `intrinsicContentSize` now reports the ad size. |
 | `onAdFailedToLoad` | ✅ | Load failed. `error.code` identifies the reason. |
-| `onAdImpression` | Optional | MRC viewability impression recorded (≥ 50 % visible for ≥ 1 contiguous second). Fires at most once per instance; impression tracking URLs fire at the same moment. Default is a no-op. |
+| `onAdImpression` | Optional | Viewability impression recorded (≥ 50 % of the banner visible on screen). Fires at most once per instance; impression tracking URLs fire at the same moment. Default is a no-op. |
 | `onAdFailedToShow` | Optional | Rendering failed after a successful load (e.g. player crash or stall). Destroy the instance and load a new one. Default is a no-op. |
 | `onAdClicked` | Optional | User tapped through. SDK opens click URL automatically. Default is a no-op. |
 
@@ -2467,7 +2558,7 @@ func destroy()
 |--------|-------------|
 | `adRequest` | The request used to create this instance. |
 | `load(bannerView:delegate:)` | Starts loading and, on success, renders into `bannerView`. Exactly one of `onAdLoaded` / `onAdFailedToLoad` fires per call. Fails with `loadAlreadyInProgress` (2003), `adAlreadyLoaded` (2008), or `adDestroyed` (2010) for invalid calls. Must be called on the main thread. |
-| `destroy()` | Cancels any in-flight load, tears down the player, removes rendered content from the banner view, and silences callbacks. Idempotent. Safe from any thread. |
+| `destroy()` | Cancels any in-flight load, removes rendered content from the banner view, and silences callbacks. Idempotent. Safe from any thread. |
 
 **`VelocityBannerAdView`:**
 
