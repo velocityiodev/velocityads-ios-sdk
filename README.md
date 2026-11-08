@@ -4,6 +4,27 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 
 **Requirements:** iOS 15.0+, Xcode 26.0+, Swift 5.5+
 
+## Apple Ad Attribution
+
+To support Apple app-install attribution, add Velocity's identifier to both
+attribution arrays in your app target's `Info.plist`. Apple accepts the same
+`.adattributionkit` identifier across AdAttributionKit and SKAdNetwork:
+
+```xml
+<key>AdNetworkIdentifiers</key>
+<array>
+    <string>rwn33vua23.adattributionkit</string>
+</array>
+<key>SKAdNetworkItems</key>
+<array>
+    <dict>
+        <key>SKAdNetworkIdentifier</key>
+        <string>rwn33vua23.adattributionkit</string>
+    </dict>
+</array>
+```
+
+
 ---
 
 ## Installation (Swift Package Manager)
@@ -13,7 +34,7 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
    ```
    https://github.com/velocityiodev/velocityads-ios-sdk
    ```
-3. Choose the version rule (e.g. "Up to Next Major" from `0.11.0`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" from `0.12.0`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 ---
@@ -23,7 +44,7 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.11.0'
+pod 'VelocityAdsSDK', '0.12.0'
 ```
 
 Then run:

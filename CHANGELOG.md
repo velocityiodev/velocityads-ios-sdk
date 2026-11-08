@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.0] - 2026-11-08
+
+### Added
+- Apple app-install attribution through AdAttributionKit and SKAdNetwork 2.x, 3, and 4. Add `rwn33vua23.adattributionkit` to both the app target's `AdNetworkIdentifiers` array and its `SKAdNetworkItems` entries in `Info.plist`; the SDK selects the applicable attribution method automatically.
+
+### Breaking Changes
+- **Native Ads** — The native ads API has breaking changes: SDK-rendered native ad views are now placed at one of two heights (120 pt / 254 pt) and size themselves, the collapse API is removed, and the `NativeAd` data model, `AdColors` and `AdTypography` have changed. See the "Migrating to 0.12.0 (Native Ads)" section of the Integration Guide to update your integration.
+
 ## [0.11.0] - 2026-10-04
 
 ### Breaking Changes
