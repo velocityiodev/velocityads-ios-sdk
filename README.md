@@ -6,24 +6,13 @@ Velocity Ads is an iOS SDK that provides AI-powered contextual advertising.
 
 ## Apple Ad Attribution
 
-To support Apple app-install attribution, add Velocity's identifier to both
-attribution arrays in your app target's `Info.plist`. Apple accepts the same
-`.adattributionkit` identifier across AdAttributionKit and SKAdNetwork:
+To support Apple app-install attribution, add Velocity's ad network IDs to your
+app target's `Info.plist`, under **both** `AdNetworkIdentifiers`
+(AdAttributionKit) and `SKAdNetworkItems` (SKAdNetwork). Without them, installs
+from Velocity ads can't be attributed.
 
-```xml
-<key>AdNetworkIdentifiers</key>
-<array>
-    <string>rwn33vua23.adattributionkit</string>
-</array>
-<key>SKAdNetworkItems</key>
-<array>
-    <dict>
-        <key>SKAdNetworkIdentifier</key>
-        <string>rwn33vua23.adattributionkit</string>
-    </dict>
-</array>
-```
-
+Copy the full, up-to-date list from the [SKAdNetwork](https://docs.velocity.io/ios/skadnetwork) page of the
+Velocity Knowledge Center and paste it exactly as it is.
 
 ---
 
@@ -34,7 +23,7 @@ attribution arrays in your app target's `Info.plist`. Apple accepts the same
    ```
    https://github.com/velocityiodev/velocityads-ios-sdk
    ```
-3. Choose the version rule (e.g. "Up to Next Major" from `0.12.0`) and add the package.
+3. Choose the version rule (e.g. "Up to Next Major" from `0.13.0`) and add the package.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 ---
@@ -44,7 +33,7 @@ attribution arrays in your app target's `Info.plist`. Apple accepts the same
 Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.12.0'
+pod 'VelocityAdsSDK', '0.13.0'
 ```
 
 Then run:
@@ -174,9 +163,23 @@ bannerAd.destroy()
 
 ---
 
+### 6. Privacy
+
+Set privacy flags before `VelocityAds.initSDK(...)` so they are sent with the first request. Later calls apply to subsequent requests.
+
+```swift
+VelocityAds.setDoNotSell(true)        // CCPA "Do Not Sell"
+VelocityAds.setConsent(true)          // GDPR consent
+VelocityAds.setIsChildDirected(true)  // COPPA child-directed treatment
+```
+
+If a flag is never set, no value is sent for it.
+
+---
+
 ## Full Documentation
 
-For installation details, initialization options, privacy (CCPA, GDPR), loading ads, and the full API reference, see the **[Integration Guide](Docs/INTEGRATION_GUIDE.md)**.
+For installation details, initialization options, privacy (CCPA, GDPR, COPPA), loading ads, and the full API reference, see the **[Integration Guide](Docs/INTEGRATION_GUIDE.md)**.
 
 ---
 
