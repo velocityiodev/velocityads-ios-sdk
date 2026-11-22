@@ -1,6 +1,6 @@
 # Velocity Ads SDK Integration Guide
 
-**Version:** 0.12.0
+**Version:** 0.13.0
 **Last Updated:** November 2026
 **Platform:** iOS 15.0+  
 **Language:** Swift 5.5+
@@ -81,14 +81,14 @@ On iOS, access to IDFA is controlled by **App Tracking Transparency (ATT)**. You
 
 The Velocity Ads SDK can be installed via **Swift Package Manager (SPM)** or **CocoaPods**.
 
-> **Current version: `0.12.0`**  
+> **Current version: `0.13.0`**  
 
 ### Swift Package Manager (SPM)
 
 1. In Xcode, go to **File → Add Package Dependencies...**
 2. Enter the package URL:  
    **`https://github.com/velocityiodev/velocityads-ios-sdk`**
-3. Set the version rule to **"Exact"** and enter **`0.12.0`**, then click **Add Package**.
+3. Set the version rule to **"Exact"** and enter **`0.13.0`**, then click **Add Package**.
 4. Add the **VelocityAdsSDK** library to your app target.
 
 The package uses a binary target hosted on GitHub Releases. Each release provides a pre-built XCFramework; Xcode resolves the correct asset automatically when you select a version.
@@ -100,7 +100,7 @@ The package uses a binary target hosted on GitHub Releases. Each release provide
 1. Add the following to your `Podfile`:
 
 ```ruby
-pod 'VelocityAdsSDK', '0.12.0'
+pod 'VelocityAdsSDK', '0.13.0'
 ```
 
 2. Run:
@@ -172,6 +172,8 @@ struct MyApp: App {
 > **Threading:** All `VelocityAdsInitDelegate` callbacks are delivered on the **main thread**. The protocol is annotated `@MainActor` to express this guarantee to the Swift type system. Conform your delegate class with `@MainActor` so you can update your UI directly from callbacks. `UIViewController` and `UIApplicationDelegate` are already `@MainActor`-isolated by default.
 
 For best performance, call `VelocityAds.setUserId(_:)` before `VelocityAds.initSDK(...)` when a user identifier is available.
+
+> ⚠️ **COPPA:** If your app is child-directed, call `VelocityAds.setIsChildDirected(_:)` **before** `VelocityAds.initSDK(...)` so the flag is sent with the very first request. See [COPPA Child-Directed Treatment](#coppa-child-directed-treatment).
 
 **Important:**
 - ⚠️ Initialize once during app startup
@@ -1148,7 +1150,7 @@ Created → load(delegate:) → Loading → onAdLoaded → Ready
 
 Ready → show() → onAdShown → Presenting → onAdDismissed → Spent (terminal)
           ↓
-    onAdFailedToShow (ad stays Ready — retry allowed unless expired or destroyed)
+    onAdFailedToShow (destroy and load a fresh instance to recover)
 ```
 
 An interstitial instance is **single-use**: after the user dismisses the ad the instance transitions to *spent* and can neither be reloaded nor shown again. Create a new `VelocityInterstitialAd` for every impression.
@@ -1181,37 +1183,39 @@ class MyViewController: UIViewController, VelocityInterstitialAdDelegate {
 
     // MARK: - VelocityInterstitialAdDelegate
 
-    func onAdLoaded(interstitialAd: VelocityInterstitialAd) {
+    func onAdLoaded(ad: any VelocityFullscreenAd) {
         // Ad is ready — show immediately or defer to a natural break point.
-        interstitialAd.show()
+        ad.show()
     }
 
-    func onAdFailedToLoad(interstitialAd: VelocityInterstitialAd, error: VelocityAdsError) {
+    func onAdFailedToLoad(ad: any VelocityFullscreenAd, error: VelocityAdsError) {
         print("Interstitial failed to load: \(error)")
         self.interstitialAd = nil
     }
 
-    func onAdShown(interstitialAd: VelocityInterstitialAd) {
+    func onAdShown(ad: any VelocityFullscreenAd) {
         // Fullscreen surface is visible. Pause game audio, timers, etc.
     }
 
-    func onAdImpression(interstitialAd: VelocityInterstitialAd) {
-        // Ad impression recorded — align your own impression tracking here if needed.
+    func onAdImpression(ad: any VelocityFullscreenAd) {
+        // Impression recorded by the network — fires after onAdShown.
     }
 
-    func onAdFailedToShow(interstitialAd: VelocityInterstitialAd, error: VelocityAdsError) {
-        // Show was rejected. The ad is still ready unless it expired or was destroyed.
+    func onAdFailedToShow(ad: any VelocityFullscreenAd, error: VelocityAdsError) {
+        // The ad could not be shown. Destroy it and load a fresh instance to recover.
         print("Interstitial failed to show: \(error)")
+        ad.destroy()
+        self.interstitialAd = nil
+        loadInterstitial()
     }
 
-    func onAdClicked(interstitialAd: VelocityInterstitialAd) {
-        // User tapped the ad. The SDK opens the click-through URL automatically.
+    func onAdClicked(ad: any VelocityFullscreenAd) {
+        // User tapped the ad. The SDK opens the click-through destination automatically.
     }
 
-    func onAdDismissed(interstitialAd: VelocityInterstitialAd) {
-        // Fullscreen surface dismissed. Resume game, timers, etc.
-        // The instance is now spent — release it and pre-load the next one.
-        interstitialAd.destroy()
+    func onAdDismissed(ad: any VelocityFullscreenAd) {
+        // Terminal — release this instance and pre-load the next one.
+        ad.destroy()
         self.interstitialAd = nil
         loadInterstitial()   // Pre-load for the next break point
     }
@@ -1293,28 +1297,44 @@ rewardedAd.load(delegate: self)
 ### 3. Implement VelocityRewardedAdDelegate
 
 ```swift
-extension YourViewController: VelocityRewardedAdDelegate {
+@MainActor
+class YourViewController: UIViewController, VelocityRewardedAdDelegate {
 
     // Required
-    func onAdLoaded(rewardedAd: VelocityRewardedAd) {
-        // Ad is ready — show when appropriate
-        rewardedAd.show()
+    func onAdLoaded(ad: any VelocityFullscreenAd) {
+        // Ad is ready — show at the next opt-in moment
+        ad.show()
     }
 
-    func onAdFailedToLoad(rewardedAd: VelocityRewardedAd, error: VelocityAdsError) {
+    func onAdFailedToLoad(ad: any VelocityFullscreenAd, error: VelocityAdsError) {
         print("Rewarded ad failed to load: \(error)")
     }
 
-    func onUserRewarded(rewardedAd: VelocityRewardedAd) {
-        // Grant reward to user
+    func onUserRewarded(ad: any VelocityFullscreenAd) {
+        // Grant the reward to the user
     }
 
     // Optional
-    func onAdShown(rewardedAd: VelocityRewardedAd) { }
-    func onAdImpression(rewardedAd: VelocityRewardedAd) { }
-    func onAdDismissed(rewardedAd: VelocityRewardedAd) {
-        // Create a new VelocityRewardedAd for the next ad
-        rewardedAd.destroy()
+    func onAdShown(ad: any VelocityFullscreenAd) {
+        // Fullscreen surface is visible — pause game audio, timers, etc.
+    }
+
+    func onAdImpression(ad: any VelocityFullscreenAd) {
+        // Impression recorded by the network — fires after onAdShown
+    }
+
+    func onAdFailedToShow(ad: any VelocityFullscreenAd, error: VelocityAdsError) {
+        // Destroy and load a fresh instance to recover
+        ad.destroy()
+    }
+
+    func onAdClicked(ad: any VelocityFullscreenAd) {
+        // User tapped the ad — the SDK opens the click-through destination automatically
+    }
+
+    func onAdDismissed(ad: any VelocityFullscreenAd) {
+        // Terminal — release this instance and pre-load the next one
+        ad.destroy()
     }
 }
 ```
@@ -1323,14 +1343,16 @@ extension YourViewController: VelocityRewardedAdDelegate {
 
 | Callback | Required | Description |
 |---|---|---|
-| `onAdLoaded(rewardedAd:)` | Yes | Ad loaded and ready to show |
-| `onAdFailedToLoad(rewardedAd:error:)` | Yes | Ad failed to load |
-| `onUserRewarded(rewardedAd:)` | Yes | User completed the video; grant the reward |
-| `onAdShown(rewardedAd:)` | No | Fullscreen surface became visible |
-| `onAdImpression(rewardedAd:)` | No | Ad impression recorded |
-| `onAdFailedToShow(rewardedAd:error:)` | No | `show()` was rejected or failed |
-| `onAdClicked(rewardedAd:)` | No | User opened the click-through |
-| `onAdDismissed(rewardedAd:)` | No | Fullscreen surface dismissed (terminal callback) |
+| `onAdLoaded` | Yes | Ad loaded and ready. Enable your reward button. |
+| `onAdFailedToLoad` | Yes | Load failed. Disable the reward button. |
+| `onUserRewarded` | Yes | User completed the video — grant the reward. Fires before `onAdDismissed`. |
+| `onAdShown` | No | Fullscreen surface is visible. Pause game audio, timers, etc. |
+| `onAdImpression` | No | Impression recorded by the network. Fires after `onAdShown`. |
+| `onAdFailedToShow` | No | The ad could not be shown. Destroy the instance and load a fresh one to recover. |
+| `onAdClicked` | No | User tapped the ad. The SDK opens the click-through destination automatically. |
+| `onAdDismissed` | No | Surface dismissed — terminal. Release this instance and pre-load the next one. |
+
+All callbacks are delivered on the **main thread**.
 
 ---
 
@@ -1580,6 +1602,30 @@ VelocityAds.setConsent(false)
 ```
 
 - ⚠️ **Geography-Specific:** Only call this API in regions where GDPR regulations apply.
+
+### COPPA Child-Directed Treatment
+
+If your app, or a specific user, is directed at children under the Children's Online Privacy Protection Act (COPPA), tell the SDK so ad requests are treated as child-directed.
+
+#### API Details
+
+**Method:** `VelocityAds.setIsChildDirected(_:)`
+
+**Parameters:**
+- `isChildDirected` (`Bool`) - `true` marks the app/user as child-directed under COPPA, `false` marks it as not child-directed
+
+**Example:**
+
+```swift
+// Call before initializing the SDK
+VelocityAds.setIsChildDirected(true)
+
+let initRequest = VelocityAdsInitRequest.Builder("YOUR_APPLICATION_KEY").build()
+VelocityAds.initSDK(initRequest, delegate: MyInitDelegate())
+```
+
+- ⚠️ **Call this before initializing the SDK**, so the flag goes out with the very first request. Calls made later still apply to the following requests.
+- If you never call it, no value is sent and the server's default applies.
 
 ---
 
@@ -1899,6 +1945,17 @@ VelocityAds.setUserId(_ userId: String?)
 - `userId` - Publisher user identifier (optional)
 
 For best performance, set user ID before calling `initSDK`.
+
+#### `setIsChildDirected(_:)`
+
+```swift
+VelocityAds.setIsChildDirected(_ isChildDirected: Bool)
+```
+
+**Parameters:**
+- `isChildDirected` - `true` if the app/user is child-directed under COPPA, `false` otherwise
+
+Call before `initSDK` so the flag is sent with the first request. Later calls apply to subsequent requests. See [COPPA Child-Directed Treatment](#coppa-child-directed-treatment).
 
 #### `initSDK(_:delegate:)`
 
@@ -2349,14 +2406,14 @@ Video playback inside an SDK-rendered card is not reported to the delegate.
 
 ```swift
 @MainActor
-protocol VelocityInterstitialAdDelegate: AnyObject {
-    func onAdLoaded(interstitialAd: VelocityInterstitialAd)
-    func onAdFailedToLoad(interstitialAd: VelocityInterstitialAd, error: VelocityAdsError)
-    func onAdShown(interstitialAd: VelocityInterstitialAd)
-    func onAdImpression(interstitialAd: VelocityInterstitialAd)
-    func onAdFailedToShow(interstitialAd: VelocityInterstitialAd, error: VelocityAdsError)
-    func onAdClicked(interstitialAd: VelocityInterstitialAd)
-    func onAdDismissed(interstitialAd: VelocityInterstitialAd)
+protocol VelocityInterstitialAdDelegate: VelocityFullscreenAdDelegate {
+    func onAdLoaded(ad: any VelocityFullscreenAd)
+    func onAdFailedToLoad(ad: any VelocityFullscreenAd, error: VelocityAdsError)
+    func onAdShown(ad: any VelocityFullscreenAd)                                  // optional — default no-op
+    func onAdImpression(ad: any VelocityFullscreenAd)                             // optional — default no-op
+    func onAdFailedToShow(ad: any VelocityFullscreenAd, error: VelocityAdsError)  // optional — default no-op
+    func onAdClicked(ad: any VelocityFullscreenAd)                                // optional — default no-op
+    func onAdDismissed(ad: any VelocityFullscreenAd)                              // optional — default no-op
 }
 ```
 
@@ -2364,13 +2421,13 @@ All methods are delivered on the **main thread**. The protocol is `@MainActor`-a
 
 | Method | Required | Description |
 |--------|----------|-------------|
-| `onAdLoaded` | ✅ | Ad loaded and ready. Call `show()` now or at a later break point. |
-| `onAdFailedToLoad` | ✅ | Load failed. `error.code` identifies the reason. Retry by calling `load(delegate:)` again. |
-| `onAdShown` | Optional | Fullscreen surface is visible. Pause game audio/timers. Default is a no-op. |
-| `onAdImpression` | Optional | Ad impression recorded. Fires after `onAdShown`, once the impression has been counted. Default is a no-op. |
-| `onAdFailedToShow` | Optional | `show()` was rejected. Ad remains ready unless expired/destroyed. Default is a no-op. |
-| `onAdClicked` | Optional | User tapped through. SDK opens click URL automatically. Default is a no-op. |
-| `onAdDismissed` | Optional | Surface dismissed — terminal callback. Release the instance and pre-load the next one. Default is a no-op. |
+| `onAdLoaded` | ✅ | Ad loaded and ready. Call `show()` now or defer to a break point. |
+| `onAdFailedToLoad` | ✅ | Load failed. Retry by calling `load(delegate:)` again on the same instance. |
+| `onAdShown` | Optional | Fullscreen surface is visible. Pause game audio, timers, etc. Default is a no-op. |
+| `onAdImpression` | Optional | Impression recorded by the network. Fires after `onAdShown`. Default is a no-op. |
+| `onAdFailedToShow` | Optional | The ad could not be shown. Destroy the instance and load a fresh one to recover. Default is a no-op. |
+| `onAdClicked` | Optional | User tapped the ad. The SDK opens the click-through destination automatically. Default is a no-op. |
+| `onAdDismissed` | Optional | Surface dismissed — terminal. Release this instance and pre-load the next one. Default is a no-op. |
 
 #### `VelocityInterstitialAdRequest` / `VelocityInterstitialAd`
 
@@ -2433,8 +2490,8 @@ All callbacks are delivered on the **main thread**. The protocol is `@MainActor`
 
 ```
 VelocityFullscreenAdDelegate
-├─ VelocityInterstitialAdDelegate   (ad parameter typed as VelocityInterstitialAd)
-└─ VelocityRewardedAdDelegate       (ad parameter typed as VelocityRewardedAd; adds onUserRewarded)
+├─ VelocityInterstitialAdDelegate
+└─ VelocityRewardedAdDelegate       (adds onUserRewarded)
 ```
 
 ---
@@ -2455,11 +2512,11 @@ All methods are delivered on the **main thread**. The protocol is `@MainActor`-a
 | `onAdLoaded` | ✅ | Ad loaded and ready. Call `show()` now or at a later break point. |
 | `onAdFailedToLoad` | ✅ | Load failed. `error.code` identifies the reason. |
 | `onUserRewarded` | ✅ | User completed the video — grant the in-app reward. Fires before `onAdDismissed`. Not fired if the user skips before completion. |
-| `onAdShown` | Optional | Fullscreen surface is visible. Pause game audio/timers. Default is a no-op. |
-| `onAdImpression` | Optional | Ad impression recorded. Fires after `onAdShown`. Default is a no-op. |
-| `onAdFailedToShow` | Optional | `show()` was rejected. Ad remains ready unless expired/destroyed. Default is a no-op. |
-| `onAdClicked` | Optional | User tapped through. SDK opens click URL automatically. Default is a no-op. |
-| `onAdDismissed` | Optional | Surface dismissed — terminal callback. Release the instance and pre-load the next one. Default is a no-op. |
+| `onAdShown` | Optional | Fullscreen surface is visible. Pause game audio, timers, etc. Default is a no-op. |
+| `onAdImpression` | Optional | Impression recorded by the network. Fires after `onAdShown`. Default is a no-op. |
+| `onAdFailedToShow` | Optional | The ad could not be shown. Destroy the instance and load a fresh one to recover. Default is a no-op. |
+| `onAdClicked` | Optional | User tapped the ad. The SDK opens the click-through destination automatically. Default is a no-op. |
+| `onAdDismissed` | Optional | Surface dismissed — terminal. Release this instance and pre-load the next one. Default is a no-op. |
 
 #### `VelocityRewardedAdRequest` / `VelocityRewardedAd`
 
@@ -2522,7 +2579,7 @@ All callbacks are delivered on the **main thread**. The protocol is `@MainActor`
 | `onAdFailedToLoad` | ✅ | Load failed. `error.code` identifies the reason. |
 | `onAdImpression` | Optional | Viewability impression recorded (≥ 50 % of the banner visible on screen). Fires at most once per instance; impression tracking URLs fire at the same moment. Default is a no-op. |
 | `onAdFailedToShow` | Optional | Rendering failed after a successful load (e.g. player crash or stall). Destroy the instance and load a new one. Default is a no-op. |
-| `onAdClicked` | Optional | User tapped through. SDK opens click URL automatically. Default is a no-op. |
+| `onAdClicked` | Optional | User tapped the ad. The SDK opens the click-through destination automatically. Default is a no-op. |
 
 #### `VelocityBannerAdRequest` / `VelocityBannerAd` / `VelocityBannerAdView`
 

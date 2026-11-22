@@ -1,19 +1,29 @@
 # Changelog
 
+## [0.13.0] - 2026-11-22
+
+### Added
+
+- **COPPA child-directed treatment** — Added `VelocityAds.setIsChildDirected(_:)`. Pass `true` to mark the app/user as child-directed under COPPA, or `false` to mark it as not child-directed. Call it before `VelocityAds.initSDK(...)` so the flag is sent with the first request; later calls apply to subsequent requests. If it is never called, no value is sent.
+
 ## [0.12.0] - 2026-11-08
 
 ### Added
-- Apple app-install attribution through AdAttributionKit and SKAdNetwork 2.x, 3, and 4. Add `rwn33vua23.adattributionkit` to both the app target's `AdNetworkIdentifiers` array and its `SKAdNetworkItems` entries in `Info.plist`; the SDK selects the applicable attribution method automatically.
+
+- **Apple attribution support** — Added support for SKAdNetwork and AdAttributionKit. Action required: add Velocity’s IDs to `Info.plist` under `SKAdNetworkItems` and `AdNetworkIdentifiers`. See [SKAdNetwork](https://docs.velocity.io/ios/skadnetwork) for more info.
 
 ### Breaking Changes
-- **Native Ads** — The native ads API has breaking changes: SDK-rendered native ad views are now placed at one of two heights (120 pt / 254 pt) and size themselves, the collapse API is removed, and the `NativeAd` data model, `AdColors` and `AdTypography` have changed. See the "Migrating to 0.12.0 (Native Ads)" section of the Integration Guide to update your integration.
+
+- **Native Ads** — SDK 0.12.0 introduces breaking changes to native ad integrations. Review the [Migration to 0.12.0](https://docs.velocity.io/ios/native-ads#migration-to-0-12-0-native-ads) guide and update your integration before upgrading.
 
 ## [0.11.0] - 2026-10-04
 
 ### Breaking Changes
+
 - Raised minimum iOS deployment target to iOS 15.0.
 
 ### Changed
+
 - `VelocityBannerAdDelegate` now inherits `Sendable`. This has no effect under default Swift 5 settings, but projects compiled in Swift 6 mode or with `-strict-concurrency=complete` may see new warnings on conforming types that carry non-`Sendable` stored properties.
 
 ## [0.10.1] - 2026-09-16
@@ -23,10 +33,12 @@
 ## [0.10.0] - 2026-09-06
 
 ### Added
+
 - **Rewarded Video Ads**: Added support for Rewarded Video Ads.
 - **Interstitial Ads**: Added support for Interstitial Ads.
 
 ### Breaking Changes
+
 - **Native Ad API methods renamed** — The `Ad` suffix has been removed from both instance methods on `VelocityNativeAd`. Update all call sites:
   - `nativeAd.loadAd(delegate:)` → `nativeAd.load(delegate:)`
   - `nativeAd.destroyAd()` → `nativeAd.destroy()`
